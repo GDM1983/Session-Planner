@@ -1077,13 +1077,12 @@ table.sched td.rmCell{text-align:center;}
   var initialSnapshot=null;
   function captureSnapshot(){
     var fields=[];
-    document.querySelectorAll('[contenteditable]').forEach(function(el){
-      if(el.closest('#roster') || el.closest('#groupsContainer')) return; // roster + groups are rebuilt, not restored verbatim
-      fields.push({el:el, html:el.innerHTML});
+    qcDefaultFields().forEach(function(f){
+      if(f.el.closest('#roster') || f.el.closest('#groupsContainer')) return; // roster + groups are rebuilt, not restored verbatim
+      fields.push(f);
     });
     var st=document.getElementById('sessionTemplate');
-    var dEl=document.getElementById('sessionDateInput'), tEl=document.getElementById('sessionTimeInput');
-    initialSnapshot={fields:fields, template: st?st.value:null, dateVal:dEl?dEl.value:'', timeVal:tEl?tEl.value:''};
+    initialSnapshot={fields:fields, template: st?st.value:null, dateVal:'', timeVal:''};
   }
   // ---- the actual reset (no prompts) ----
   function doPlannerRestore(){
@@ -1100,6 +1099,7 @@ table.sched td.rmCell{text-align:center;}
     builtSkill=null;                            // force group structure rebuild for the restored session
     renderGroups();
     if(typeof clearSaved==='function') clearSaved();  // wipe the auto-saved copy so a refresh stays cleared
+    qcFinishRestore('');
     syncPageTitle();
   }
 
@@ -1626,12 +1626,11 @@ document.addEventListener('DOMContentLoaded',function(){
   var initialSnapshot_LP=null;
   function captureSnapshot_LP(){
     var fields=[];
-    document.querySelectorAll('[contenteditable]').forEach(function(el){
-      if(el.closest('#roster-lp') || el.closest('#groupsContainer-lp')) return;
-      fields.push({el:el, html:el.innerHTML});
+    qcDefaultFields().forEach(function(f){
+      if(f.el.closest('#roster-lp') || f.el.closest('#groupsContainer-lp')) return;
+      fields.push(f);
     });
-    var dEl=document.getElementById('sessionDateInput'), tEl=document.getElementById('sessionTimeInput');
-    initialSnapshot_LP={fields:fields, dateVal:dEl?dEl.value:'', timeVal:tEl?tEl.value:''};
+    initialSnapshot_LP={fields:fields, dateVal:'', timeVal:''};
   }
   function doPlannerRestore_LP(){
     if(!confirm('Reset this session? This clears availability, rotations and all typed fields.')) return;
@@ -1647,6 +1646,7 @@ document.addEventListener('DOMContentLoaded',function(){
     rotationData_LP={};
     renderGroups_LP();
     try{ localStorage.removeItem(LS_KEY_LP); }catch(e){}
+    qcFinishRestore('LP');
     syncPageTitle_LP();
   }
 
@@ -2078,12 +2078,11 @@ document.addEventListener('DOMContentLoaded',function(){
   var initialSnapshot_CN=null;
   function captureSnapshot_CN(){
     var fields=[];
-    document.querySelectorAll('[contenteditable]').forEach(function(el){
-      if(el.closest('#roster-cn')) return;
-      fields.push({el:el, html:el.innerHTML});
+    qcDefaultFields().forEach(function(f){
+      if(f.el.closest('#roster-cn')) return;
+      fields.push(f);
     });
-    var dEl=document.getElementById('sessionDateInput'), tEl=document.getElementById('sessionTimeInput');
-    initialSnapshot_CN={fields:fields, dateVal:dEl?dEl.value:'', timeVal:tEl?tEl.value:''};
+    initialSnapshot_CN={fields:fields, dateVal:'', timeVal:''};
   }
   function doPlannerRestore_CN(){
     if(!confirm('Reset this session? This clears availability, rotations and all typed fields.')) return;
@@ -2100,6 +2099,7 @@ document.addEventListener('DOMContentLoaded',function(){
     renderGroups_CN();
     try{ localStorage.removeItem(lsKey_CN()); }catch(e){}
     if(window.qcApplySquad) qcApplySquad('CN');
+    qcFinishRestore('CN');
     syncPageTitle_CN();
   }
 
@@ -2464,12 +2464,11 @@ document.addEventListener('DOMContentLoaded',function(){
   var initialSnapshot_CW=null;
   function captureSnapshot_CW(){
     var fields=[];
-    document.querySelectorAll('[contenteditable]').forEach(function(el){
-      if(el.closest('#roster-cw') || el.closest('#scenariosContainer-cw')) return;
-      fields.push({el:el, html:el.innerHTML});
+    qcDefaultFields().forEach(function(f){
+      if(f.el.closest('#roster-cw') || f.el.closest('#scenariosContainer-cw')) return;
+      fields.push(f);
     });
-    var dEl=document.getElementById('sessionDateInput'), tEl=document.getElementById('sessionTimeInput');
-    initialSnapshot_CW={fields:fields, dateVal:dEl?dEl.value:'', timeVal:tEl?tEl.value:''};
+    initialSnapshot_CW={fields:fields, dateVal:'', timeVal:''};
   }
   function doPlannerRestore_CW(){
     if(!confirm('Reset this session? This clears availability, scenarios_CW and all typed fields.')) return;
@@ -2484,6 +2483,7 @@ document.addEventListener('DOMContentLoaded',function(){
     renderGroups_CW();
     try{ localStorage.removeItem(lsKey_CW()); }catch(e){}
     if(window.qcApplySquad) qcApplySquad('CW');
+    qcFinishRestore('CW');
     syncPageTitle_CW();
   }
 
@@ -4062,6 +4062,64 @@ document.addEventListener('DOMContentLoaded',function(){
 
     document.addEventListener('touchcancel', cleanup);
   })();
+</script>
+
+
+<!-- ==================== RESTORE = TRULY BLANK ==================== -->
+<script>
+(function(){
+  /* Bug fixed: Restore put the page back to a "fresh" snapshot, but three of the four session
+     types took that snapshot AFTER your saved work had already been loaded back in, so Restore
+     just re-applied your own typing (and the date/time/venue/week/session in the header).
+     Now the true blank page is captured once, before any saved work is laid over it, and every
+     Restore resets to that. Player names are still kept; Program is left alone because it picks
+     which squad's roster/plan you are working on. */
+  var defaults = [];
+  window.qcDefaultFields = function(){
+    // elements still on the page only (dynamic boxes that were rebuilt are handled by each phase's own reset)
+    return defaults.filter(function(f){ return document.contains(f.el); });
+  };
+  document.addEventListener('DOMContentLoaded', function(){
+    // registered last, so header pills (Week / Session / Venue) already exist; runs before any 'load' handler / loadState
+    defaults = [].slice.call(document.querySelectorAll('[contenteditable]')).map(function(el){ return {el:el, html:el.innerHTML}; });
+  });
+
+  function headerIdx(){
+    var idx = [], i = 0;
+    document.querySelectorAll('[contenteditable]').forEach(function(el){
+      if(el.hasAttribute('data-own') || el.closest('.roster')) return;
+      if(el.matches('.week-edit,.session-edit,.header-edit')) idx.push(i);
+      i++;
+    });
+    return idx;
+  }
+  window.qcFinishRestore = function(phase){
+    // 0) fields that were re-created by the phase's own render (so the snapshot no longer points at them) -> blank
+    var dyn = {LP:'#netGridHead-lp .net-purpose', CN:'#netGridHead-cn .net-purpose', CW:'#scenariosContainer-cw .scenario-desc'}[phase];
+    if(dyn) document.querySelectorAll(dyn).forEach(function(el){ el.innerHTML = ''; });
+    // 1) header Week / Session / Venue / Date / Time -> empty, right now
+    document.querySelectorAll('.week-edit,.session-edit,.header-edit').forEach(function(el){ el.innerHTML = ''; });
+    ['sessionDateInput','sessionTimeInput'].forEach(function(id){ var e = document.getElementById(id); if(e) e.value = ''; });
+    // 2) other session types keep their own saved copy of the header; blank it there too so a refresh can't bring it back
+    var idx = headerIdx();
+    try{
+      for(var k = 0; k < localStorage.length; k++){
+        var key = localStorage.key(k);
+        if(!key || !/^(qldPlanner_v35_state::|qc_leadership_planner_v1|qc_champ_prep_net_training_v1|qc_champ_prep_cw_scenarios_v1)/.test(key)) continue;
+        var d; try{ d = JSON.parse(localStorage.getItem(key)); }catch(e){ continue; }
+        if(!d || typeof d !== 'object') continue;
+        if(Array.isArray(d.fields)) idx.forEach(function(i){ if(i < d.fields.length) d.fields[i] = ''; });
+        if('dateVal' in d) d.dateVal = '';
+        if('timeVal' in d) d.timeVal = '';
+        localStorage.setItem(key, JSON.stringify(d));
+      }
+    }catch(e){}
+    // 3) every session type keeps its own auto-saved copy of the whole page; re-save them all from the now-blank page
+    //    (same thing that happens whenever you type), so a refresh can't resurrect the old typing
+    try{ document.dispatchEvent(new Event('input')); }catch(e){}
+    if(typeof syncPageTitle === 'function'){ try{ syncPageTitle(); }catch(e){} }
+  };
+})();
 </script>
 
 
