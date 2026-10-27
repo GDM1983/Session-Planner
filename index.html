@@ -476,6 +476,7 @@ document.addEventListener('DOMContentLoaded',function(){
               '<button id="printBtn" class="btn ghost" style="margin:4px 5px">🖨 Print / Save PDF</button>'+
               '<button id="saveSessionBtn" class="btn ghost" style="margin:4px 5px">💾 Save Session</button>'+
               '<button id="sessionLibraryBtn" class="btn ghost" style="margin:4px 5px">📚 Session Library</button>'+
+              '<button id="pageSettingsBtn" class="btn ghost" style="margin:4px 5px">⚙ Page Settings</button>'+
               '<button id="clearWeekBtn" class="btn" style="margin:4px 5px">Restore</button>';
   notes.after(d);
   document.getElementById('snapshotBtn').onclick=function(){ if(typeof window.plannerSaveSnapshot==='function') window.plannerSaveSnapshot(); };
@@ -484,6 +485,7 @@ document.addEventListener('DOMContentLoaded',function(){
   document.getElementById('clearWeekBtn').onclick=function(){
    if(typeof window.plannerRestore==='function') window.plannerRestore();
   };
+  document.getElementById('pageSettingsBtn').onclick=function(){ if(typeof window.qcOpenSettings==='function') window.qcOpenSettings(); };
  }
 });
 </script><style>
@@ -761,6 +763,7 @@ table.sched td.rmCell{text-align:center;}
       <button class="btn ghost" onclick="removeNet_LP()">&minus; Remove Last Net</button>
       <button class="btn ghost" onclick="addRotation_LP()">+ Add Rotation</button>
       <button class="btn ghost" onclick="removeRotation_LP()">&minus; Remove Last Rotation</button>
+      <button class="btn ghost" onclick="qcOpenSettings()">&#9881; Rename nets / rotations</button>
     </div>
   </div>
 
@@ -809,6 +812,7 @@ table.sched td.rmCell{text-align:center;}
       <button class="btn ghost" onclick="removeNet_CN()">&minus; Remove Last Net</button>
       <button class="btn ghost" onclick="addRotation_CN()">+ Add Rotation</button>
       <button class="btn ghost" onclick="removeRotation_CN()">&minus; Remove Last Rotation</button>
+      <button class="btn ghost" onclick="qcOpenSettings()">&#9881; Rename nets / rotations</button>
     </div>
   </div>
 
@@ -1492,7 +1496,7 @@ document.addEventListener('DOMContentLoaded',function(){
     head.querySelectorAll('.net-purpose').forEach(function(el){ savedPurposes[el.getAttribute('data-station')]=el.innerHTML; });
     head.innerHTML = '<tr class="net-head-row"><th class="corner"></th>' +
       netsList_LP.map(function(net,i){
-        return '<th class="net-col"><div class="net-name"><span>'+esc_LP(net)+'</span>'+
+        return '<th class="net-col"><div class="net-name"><span class="net-title" title="Click to rename">'+esc_LP(net)+'</span>'+
           (netsList_LP.length>1 && i===netsList_LP.length-1 ? '<span class="net-col-remove" onclick="removeNet_LP()">remove</span>' : '') +
           '</div><div class="net-purpose" contenteditable="true" data-station="'+esc_LP(net)+'">'+(savedPurposes[net]||'')+'</div></th>';
       }).join('') + '</tr>';
@@ -1529,7 +1533,7 @@ document.addEventListener('DOMContentLoaded',function(){
           '<div class="role-box bowl"><div class="role-lab">Bowl</div><div class="role-pills" data-role="Bowling">'+pills(bowl)+'</div></div>'+
         '</td>';
       }).join('');
-      return '<tr><td class="rot-label">Rotation '+r+'</td>'+cells+'</tr>';
+      return '<tr><td class="rot-label" title="Click to rename">'+esc_LP((window.rotLabels_LP||{})[r]||('Rotation '+r))+'</td>'+cells+'</tr>';
     }).join('');
 
     body.querySelectorAll('.role-pills').forEach(function(zone){
@@ -1636,7 +1640,7 @@ document.addEventListener('DOMContentLoaded',function(){
     if(!confirm('Reset this session? This clears availability, rotations and all typed fields.')) return;
     if(!initialSnapshot_LP) captureSnapshot_LP();
     netsList_LP=['Net 1','Net 2','Net 3'];
-    rotationCount_LP=2;
+    rotationCount_LP=2; window.rotLabels_LP={};
     renderNetGridHead_LP();
     initialSnapshot_LP.fields.forEach(function(f){ try{ f.el.innerHTML=f.html; }catch(e){} });
     var dEl=document.getElementById('sessionDateInput'), tEl=document.getElementById('sessionTimeInput');
@@ -1658,7 +1662,7 @@ document.addEventListener('DOMContentLoaded',function(){
     var fields=[];
     document.querySelectorAll('[contenteditable]').forEach(function(el){ if(el.hasAttribute('data-own')||el.closest('#roster-lp'))return; fields.push(el.innerHTML); });
     var dEl=document.getElementById('sessionDateInput'), tEl=document.getElementById('sessionTimeInput');
-    return {v:1, chips:chips, fields:fields, rotationData_LP:rotationData_LP, netsList_LP:netsList_LP, rotationCount_LP:rotationCount_LP, dateVal:dEl?dEl.value:'', timeVal:tEl?tEl.value:''};
+    return {v:1, chips:chips, fields:fields, rotationData_LP:rotationData_LP, netsList_LP:netsList_LP, rotationCount_LP:rotationCount_LP, rotLabels_LP:(window.rotLabels_LP||{}), dateVal:dEl?dEl.value:'', timeVal:tEl?tEl.value:''};
   }
   function reallySave_LP(){ try{ localStorage.setItem(LS_KEY_LP, JSON.stringify(collectState_LP())); }catch(e){} }
   function saveState_LP(){ if(!saveEnabled_LP) return; clearTimeout(saveTimer_LP); saveTimer_LP=setTimeout(reallySave_LP, 400); }
@@ -1702,6 +1706,7 @@ document.addEventListener('DOMContentLoaded',function(){
     rotationData_LP = migrateRotationData_LP(d.rotationData_LP || {});
     netsList_LP = (d.netsList_LP && d.netsList_LP.length) ? d.netsList_LP : ['Net 1','Net 2','Net 3'];
     rotationCount_LP = d.rotationCount_LP || 2;
+    window.rotLabels_LP = d.rotLabels_LP || {};
     renderNetGridHead_LP();
     (d.chips||[]).forEach(function(ch){
       var c=makeChip_LP(ch.n, ch.s||'in');
@@ -1944,7 +1949,7 @@ document.addEventListener('DOMContentLoaded',function(){
     head.querySelectorAll('.net-purpose').forEach(function(el){ savedPurposes[el.getAttribute('data-station')]=el.innerHTML; });
     head.innerHTML = '<tr class="net-head-row"><th class="corner"></th>' +
       netsList_CN.map(function(net,i){
-        return '<th class="net-col"><div class="net-name"><span>'+esc_CN(net)+'</span>'+
+        return '<th class="net-col"><div class="net-name"><span class="net-title" title="Click to rename">'+esc_CN(net)+'</span>'+
           (netsList_CN.length>1 && i===netsList_CN.length-1 ? '<span class="net-col-remove" onclick="removeNet_CN()">remove</span>' : '') +
           '</div><div class="net-purpose" contenteditable="true" data-station="'+esc_CN(net)+'">'+(savedPurposes[net]||'')+'</div></th>';
       }).join('') + '</tr>';
@@ -1980,7 +1985,7 @@ document.addEventListener('DOMContentLoaded',function(){
           '<div class="role-box bowl"><div class="role-lab">Bowl</div><div class="role-pills" data-role="Bowling">'+pills(bowl)+'</div></div>'+
         '</td>';
       }).join('');
-      return '<tr><td class="rot-label">Rotation '+r+'</td>'+cells+'</tr>';
+      return '<tr><td class="rot-label" title="Click to rename">'+esc_CN((window.rotLabels_CN||{})[r]||('Rotation '+r))+'</td>'+cells+'</tr>';
     }).join('');
 
     body.querySelectorAll('.role-pills').forEach(function(zone){
@@ -2088,7 +2093,7 @@ document.addEventListener('DOMContentLoaded',function(){
     if(!confirm('Reset this session? This clears availability, rotations and all typed fields.')) return;
     if(!initialSnapshot_CN) captureSnapshot_CN();
     netsList_CN=['CW','Net 1','Net 2','Net 3'];
-    rotationCount_CN=3;
+    rotationCount_CN=3; window.rotLabels_CN={};
     renderNetGridHead_CN();
     initialSnapshot_CN.fields.forEach(function(f){ try{ f.el.innerHTML=f.html; }catch(e){} });
     var dEl=document.getElementById('sessionDateInput'), tEl=document.getElementById('sessionTimeInput');
@@ -2111,7 +2116,7 @@ document.addEventListener('DOMContentLoaded',function(){
     var fields=[];
     document.querySelectorAll('[contenteditable]').forEach(function(el){ if(el.hasAttribute('data-own')||el.closest('#roster-cn'))return; fields.push(el.innerHTML); });
     var dEl=document.getElementById('sessionDateInput'), tEl=document.getElementById('sessionTimeInput');
-    return {v:1, fielding:(document.getElementById('fielding-cn')||{}).innerHTML||'', chips:chips, fields:fields, rotationData_CN:rotationData_CN, netsList_CN:netsList_CN, rotationCount_CN:rotationCount_CN, dateVal:dEl?dEl.value:'', timeVal:tEl?tEl.value:''};
+    return {v:1, fielding:(document.getElementById('fielding-cn')||{}).innerHTML||'', chips:chips, fields:fields, rotationData_CN:rotationData_CN, netsList_CN:netsList_CN, rotationCount_CN:rotationCount_CN, rotLabels_CN:(window.rotLabels_CN||{}), dateVal:dEl?dEl.value:'', timeVal:tEl?tEl.value:''};
   }
   function reallySave_CN(){ try{ localStorage.setItem(lsKey_CN(), JSON.stringify(collectState_CN())); }catch(e){} }
   function saveState_CN(){ if(!saveEnabled_CN) return; clearTimeout(saveTimer_CN); saveTimer_CN=setTimeout(reallySave_CN, 400); }
@@ -2137,7 +2142,7 @@ document.addEventListener('DOMContentLoaded',function(){
 
   /* clears ONLY this page's own content (used when the Program is switched) */
   function resetPhase_CN(){
-    netsList_CN=['CW','Net 1','Net 2','Net 3']; rotationCount_CN=3; rotationData_CN={};
+    netsList_CN=['CW','Net 1','Net 2','Net 3']; rotationCount_CN=3; window.rotLabels_CN={}; rotationData_CN={};
     roster_CN.innerHTML='';
     document.querySelectorAll('#body-champnet [contenteditable]').forEach(function(el){ if(el.closest('#roster-cn'))return; el.innerHTML=''; });
     renderNetGridHead_CN(); render_CN();
@@ -2155,6 +2160,7 @@ document.addEventListener('DOMContentLoaded',function(){
     rotationData_CN = migrateRotationData_CN(d.rotationData_CN || {});
     netsList_CN = (d.netsList_CN && d.netsList_CN.length) ? d.netsList_CN : ['CW','Net 1','Net 2','Net 3'];
     rotationCount_CN = d.rotationCount_CN || 3;
+    window.rotLabels_CN = d.rotLabels_CN || {};
     renderNetGridHead_CN();
     (d.chips||[]).forEach(function(ch){
       var c=makeChip_CN(ch.n, ch.s||'in');
@@ -4062,6 +4068,306 @@ document.addEventListener('DOMContentLoaded',function(){
 
     document.addEventListener('touchcancel', cleanup);
   })();
+</script>
+
+
+<!-- ==================== PAGE SETTINGS (rename nets / rotations / headings) ==================== -->
+<style>
+.net-name .net-title{cursor:pointer;border-bottom:1px dotted currentColor;}
+.net-grid td.rot-label{cursor:pointer;}
+.qcSetSec{margin:0 0 16px 0;}
+.qcSetSec h4{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--rust);margin:0 0 8px 0;}
+.qcSetRow{display:flex;gap:8px;align-items:center;margin-bottom:6px;}
+.qcSetRow label{flex:0 0 118px;font-size:12px;font-weight:700;color:var(--ink-soft);}
+.qcSetRow input{flex:1;min-width:0;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-size:13.5px;font-family:inherit;color:var(--ink);}
+.qcSetBtns{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;}
+.qcSetNote{font-size:12px;color:var(--ink-soft);margin:4px 0 0;}
+@media print{ .qcSetOverlay{display:none!important;} }
+</style>
+<script>
+(function(){
+  var HKEY = 'qc_headings_v1';
+  var BODY = {'':'body-preseason','LP':'body-leadership','CN':'body-champnet','CW':'body-champcw'};
+  window.rotLabels_LP = window.rotLabels_LP || {};
+  window.rotLabels_CN = window.rotLabels_CN || {};
+  window.qcRenameNets = function(){ return renameNets.apply(null, arguments); };
+  window.qcRefreshGrid = function(){ return refresh.apply(null, arguments); };
+  window.qcUniqueOk = function(){ return uniqueOk.apply(null, arguments); };
+
+  function suf(){ return (typeof activePhaseSuffix === 'function') ? activePhaseSuffix() : ''; }
+  function isSchedule(){ var t = document.getElementById('sessionTemplate'); return t && t.value === 'Season Schedule'; }
+  function esc(t){ return String(t).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+
+  /* ---------- section headings (saved as a page setting, kept through Restore) ---------- */
+  function headingEls(bodyId){
+    return [].filter.call(document.querySelectorAll('#' + bodyId + ' .card h2'), function(h){
+      if(h.dataset.qcOrig == null) h.dataset.qcOrig = h.textContent;
+      return h.children.length === 0 && !/skills/i.test(h.dataset.qcOrig);   // the Skills title is toggled by the page itself
+    });
+  }
+  function loadH(){ try{ return JSON.parse(localStorage.getItem(HKEY)) || {}; }catch(e){ return {}; } }
+  function applyHeadings(){
+    var all = loadH();
+    Object.keys(BODY).forEach(function(k){
+      var id = BODY[k], map = all[id] || {};
+      headingEls(id).forEach(function(h, i){
+        var want = (map[i] != null && String(map[i]).trim()) ? map[i] : h.dataset.qcOrig;
+        if(h.textContent !== want) h.textContent = want;
+      });
+    });
+  }
+  document.addEventListener('DOMContentLoaded', applyHeadings);
+  window.addEventListener('load', applyHeadings);
+
+  /* ---------- renaming nets (keeps every assignment) ---------- */
+  function renameNets(s, newNames){
+    var list = window['netsList_' + s], data = window['rotationData_' + s];
+    var old = list.slice(), map = {};
+    old.forEach(function(n, i){ if(newNames[i] != null) map[n] = newNames[i]; });
+    Object.keys(data || {}).forEach(function(p){
+      (data[p] || []).forEach(function(a){ if(map[a.net] != null) a.net = map[a.net]; });
+    });
+    // keep each net's "purpose" text with its net
+    var head = document.getElementById('netGridHead-' + s.toLowerCase());
+    if(head) head.querySelectorAll('.net-purpose').forEach(function(el){
+      var o = el.getAttribute('data-station'); if(map[o] != null) el.setAttribute('data-station', map[o]);
+    });
+    list.length = 0; newNames.forEach(function(n){ list.push(n); });
+    refresh(s);
+  }
+  function refresh(s){
+    window['renderNetGridHead_' + s](); window['renderNetGrid_' + s](window['availableNames_' + s]());
+    window['saveState_' + s]();
+  }
+  function uniqueOk(arr){
+    var seen = {}; for(var i = 0; i < arr.length; i++){ var k = arr[i].trim().toLowerCase(); if(!k || seen[k]) return false; seen[k] = 1; } return true;
+  }
+
+  // quick rename by clicking a net name or a rotation label
+  document.addEventListener('click', function(e){
+    var s = suf(); if(s !== 'LP' && s !== 'CN') return;
+    var t = e.target.closest && e.target.closest('.net-title');
+    if(t){
+      var list = window['netsList_' + s], i = list.indexOf(t.textContent);
+      if(i < 0) return;
+      var nv = prompt('Rename this net/station:', list[i]); if(nv === null) return;
+      nv = nv.trim(); var next = list.slice(); next[i] = nv;
+      if(!uniqueOk(next)){ alert('Each net needs a different, non-empty name.'); return; }
+      renameNets(s, next); return;
+    }
+    var r = e.target.closest && e.target.closest('td.rot-label');
+    if(r && r.closest('#netGridBody-' + s.toLowerCase())){
+      var idx = r.parentNode.rowIndex; // 1-based within the table incl. head row
+      var tb = r.closest('tbody'), n = [].indexOf.call(tb.rows, r.parentNode) + 1;
+      var labels = window['rotLabels_' + s], cur = labels[n] || ('Rotation ' + n);
+      var nl = prompt('Rename this rotation (leave empty to reset):', cur); if(nl === null) return;
+      nl = nl.trim(); if(nl) labels[n] = nl; else delete labels[n];
+      refresh(s);
+    }
+  });
+
+  /* ---------- the settings panel ---------- */
+  window.qcOpenSettings = function(){
+    if(document.getElementById('qcSettings')) return;
+    if(isSchedule()){ alert('Season Schedule has no page settings.'); return; }
+    var s = suf(), bodyId = BODY[s], pageName = (document.getElementById('sessionTemplate').selectedOptions[0] || {}).text || 'this page';
+    var heads = headingEls(bodyId), saved = (loadH()[bodyId] || {});
+    var nets = (s === 'LP' || s === 'CN') ? window['netsList_' + s].slice() : null;
+    var rotN = nets ? window['rotationCount_' + s] : 0, labels = nets ? Object.assign({}, window['rotLabels_' + s]) : {};
+
+    var ov = document.createElement('div'); ov.className = 'archOverlay qcSetOverlay'; ov.id = 'qcSettings';
+    ov.innerHTML = '<div class="archModal"><div class="archModalHead"><span>&#9881; Page settings &mdash; ' + esc(pageName) + '</span><button class="archModalX" type="button" data-a="close">&#10005;</button></div>' +
+      '<div class="archModalBody"><div id="qcSetBody"></div>' +
+      '<div class="archActions"><button class="btn ghost" type="button" data-a="close">Cancel</button><button class="btn" type="button" data-a="save">Save settings</button></div></div></div>';
+    document.body.appendChild(ov);
+
+    function draw(){
+      var h = '';
+      if(nets){
+        h += '<div class="qcSetSec"><h4>Net / station names</h4>';
+        nets.forEach(function(n, i){ h += '<div class="qcSetRow"><label>Net ' + (i + 1) + '</label><input data-net="' + i + '" value="' + esc(n) + '"></div>'; });
+        h += '<div class="qcSetBtns"><button class="btn ghost" type="button" data-a="addnet">+ Add net</button><button class="btn ghost" type="button" data-a="rmnet">&minus; Remove last net</button></div>' +
+             '<p class="qcSetNote">Renaming a net keeps everyone&rsquo;s assignments in it.</p></div>';
+        h += '<div class="qcSetSec"><h4>Rotation names</h4>';
+        for(var r = 1; r <= rotN; r++) h += '<div class="qcSetRow"><label>Rotation ' + r + '</label><input data-rot="' + r + '" placeholder="Rotation ' + r + '" value="' + esc(labels[r] || '') + '"></div>';
+        h += '<div class="qcSetBtns"><button class="btn ghost" type="button" data-a="addrot">+ Add rotation</button><button class="btn ghost" type="button" data-a="rmrot">&minus; Remove last rotation</button></div></div>';
+      }
+      if(heads.length){
+        h += '<div class="qcSetSec"><h4>Section headings on this page</h4>';
+        heads.forEach(function(el, i){
+          h += '<div class="qcSetRow"><label>' + esc(el.dataset.qcOrig) + '</label><input data-head="' + i + '" value="' + esc(el.textContent) + '"></div>';
+        });
+        h += '<div class="qcSetBtns"><button class="btn ghost" type="button" data-a="resethead">Reset headings to default</button></div>' +
+             '<p class="qcSetNote">Headings are page settings: they stay the same after Restore and when you reopen the planner.</p></div>';
+      }
+      if(!nets && !heads.length) h = '<p class="qcSetNote">Nothing to customise on this page.</p>';
+      ov.querySelector('#qcSetBody').innerHTML = h;
+    }
+    function grab(){   // read the inputs back into the working copies before any redraw
+      ov.querySelectorAll('input[data-net]').forEach(function(i){ nets[+i.getAttribute('data-net')] = i.value; });
+      ov.querySelectorAll('input[data-rot]').forEach(function(i){ var v = i.value.trim(); if(v) labels[+i.getAttribute('data-rot')] = v; else delete labels[+i.getAttribute('data-rot')]; });
+    }
+    function close(){ ov.remove(); }
+    draw();
+    ov.addEventListener('click', function(e){
+      var b = e.target.closest('[data-a]');
+      if(e.target === ov){ close(); return; }
+      if(!b) return;
+      var a = b.getAttribute('data-a');
+      if(a === 'close'){ close(); return; }
+      if(a === 'addnet'){ grab(); nets.push('Net ' + (nets.length + 1)); draw(); return; }
+      if(a === 'rmnet'){ grab(); if(nets.length <= 1){ alert('At least one net is required.'); return; } nets.pop(); draw(); return; }
+      if(a === 'addrot'){ grab(); rotN++; draw(); return; }
+      if(a === 'rmrot'){ grab(); if(rotN <= 1){ alert('At least one rotation is required.'); return; } delete labels[rotN]; rotN--; draw(); return; }
+      if(a === 'resethead'){ ov.querySelectorAll('input[data-head]').forEach(function(i){ i.value = heads[+i.getAttribute('data-head')].dataset.qcOrig; }); return; }
+      if(a === 'save'){
+        if(nets){
+          grab(); nets = nets.map(function(n){ return n.trim(); });
+          if(!uniqueOk(nets)){ alert('Each net needs a different, non-empty name.'); return; }
+          // existing nets keep their assignments under the new name; extra/removed nets behave like Add/Remove net
+          var cur = window['netsList_' + s], keep = Math.min(cur.length, nets.length);
+          var mapTo = nets.slice(0, keep);
+          var data = window['rotationData_' + s], map = {};
+          cur.slice(0, keep).forEach(function(o, i){ map[o] = mapTo[i]; });
+          Object.keys(data || {}).forEach(function(p){ (data[p] || []).forEach(function(x){ if(map[x.net] != null) x.net = map[x.net]; }); });
+          var head = document.getElementById('netGridHead-' + s.toLowerCase());
+          if(head) head.querySelectorAll('.net-purpose').forEach(function(el){ var o = el.getAttribute('data-station'); if(map[o] != null) el.setAttribute('data-station', map[o]); });
+          cur.length = 0; nets.forEach(function(n){ cur.push(n); });
+          window['rotationCount_' + s] = rotN;
+          Object.keys(labels).forEach(function(k){ if(+k > rotN) delete labels[k]; });
+          window['rotLabels_' + s] = labels;
+          refresh(s);
+        }
+        // headings
+        var all = loadH(), m = {};
+        ov.querySelectorAll('input[data-head]').forEach(function(i){
+          var idx = +i.getAttribute('data-head'), v = i.value.trim();
+          if(v && v !== heads[idx].dataset.qcOrig) m[idx] = v;
+        });
+        if(Object.keys(m).length) all[bodyId] = m; else delete all[bodyId];
+        try{ localStorage.setItem(HKEY, JSON.stringify(all)); }catch(err){}
+        applyHeadings();
+        close();
+        if(typeof syncPageTitle === 'function'){ try{ syncPageTitle(); }catch(err){} }
+      }
+    });
+  };
+  document.addEventListener('keydown', function(e){ if(e.key === 'Escape'){ var o = document.getElementById('qcSettings'); if(o) o.remove(); } });
+})();
+</script>
+
+
+<!-- ==================== NET HEADINGS: EDIT IN PLACE + READABLE TYPING + SETTINGS BUTTON ==================== -->
+<style>
+/* typing in the box under a net heading: it used to turn solid white while the text stayed white */
+.net-purpose:focus{background:rgba(255,255,255,.22)!important;color:#fff!important;-webkit-text-fill-color:#fff!important;caret-color:var(--gold)!important;box-shadow:0 0 0 2px var(--gold)!important;}
+/* safety net for any other light-text box on a dark background */
+.net-name [contenteditable]:focus,.gpanel .ghead [contenteditable]:focus{color:#fff!important;-webkit-text-fill-color:#fff!important;caret-color:var(--gold)!important;}
+/* in-place rename of a net heading / rotation label */
+.net-title[data-qc-editing],.rot-label[data-qc-editing]{background:#fff!important;color:var(--navy)!important;-webkit-text-fill-color:var(--navy)!important;caret-color:var(--navy)!important;
+  border-radius:5px;padding:2px 6px;outline:2px solid var(--gold);text-transform:none;letter-spacing:0;min-width:60px;display:inline-block;}
+.net-title:hover{opacity:.85;}
+/* page-settings gear, top-left of the header on every session page */
+#qcGear{position:absolute;top:14px;left:16px;z-index:5;border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.14);color:#fff;
+  border-radius:999px;padding:7px 13px;font:inherit;font-size:12.5px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;}
+#qcGear:hover{background:rgba(255,255,255,.26);}
+.top{position:relative;}
+@media (max-width:640px){ #qcGear .gl{display:none;} #qcGear{padding:7px 10px;} }
+@media print{ #qcGear,.qcNoSnap{display:none!important;} }
+</style>
+<script>
+(function(){
+  function suf(){ return (typeof activePhaseSuffix === 'function') ? activePhaseSuffix() : ''; }
+
+  /* ---------- edit a net heading / rotation name right where it is (no pop-up boxes) ---------- */
+  function editInline(el, commit){
+    if(el.hasAttribute('data-qc-editing')) return;
+    var orig = el.textContent;
+    el.setAttribute('data-qc-editing', '1');
+    el.setAttribute('data-own', '1');            // keeps this temporary editor out of the auto-save field list
+    el.setAttribute('contenteditable', 'true');
+    el.focus();
+    var r = document.createRange(); r.selectNodeContents(el);
+    var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+    var finished = false;
+    function finish(save){
+      if(finished) return; finished = true;
+      el.removeEventListener('keydown', onKey); el.removeEventListener('blur', onBlur);
+      var val = el.textContent.replace(/\s+/g, ' ').trim();
+      el.removeAttribute('contenteditable'); el.removeAttribute('data-own'); el.removeAttribute('data-qc-editing');
+      if(!save || val === orig){ el.textContent = orig; return; }
+      commit(val, function(){ el.textContent = orig; });
+    }
+    function onKey(e){
+      if(e.key === 'Enter'){ e.preventDefault(); finish(true); }
+      else if(e.key === 'Escape'){ e.preventDefault(); e.stopPropagation(); finish(false); }
+    }
+    function onBlur(){ finish(true); }
+    el.addEventListener('keydown', onKey); el.addEventListener('blur', onBlur);
+  }
+
+  // capture phase + stopPropagation so the older pop-up (prompt) handler no longer runs
+  document.addEventListener('click', function(e){
+    var s = suf(); if(s !== 'LP' && s !== 'CN') return;
+    var t = e.target.closest && e.target.closest('.net-title');
+    var rl = !t && e.target.closest && e.target.closest('td.rot-label');
+    if(!t && !rl) return;
+    e.stopPropagation(); e.preventDefault();
+    if(t){
+      if(t.hasAttribute('data-qc-editing')) return;
+      var list = window['netsList_' + s], i = list.indexOf(t.textContent);
+      if(i < 0) return;
+      editInline(t, function(val, revert){
+        var next = list.slice(); next[i] = val;
+        if(!window.qcUniqueOk(next)){ revert(); alert('Each net needs a different, non-empty name.'); return; }
+        window.qcRenameNets(s, next);
+      });
+    } else {
+      if(rl.hasAttribute('data-qc-editing')) return;
+      var tb = rl.closest('tbody'), n = [].indexOf.call(tb.rows, rl.parentNode) + 1;
+      var labels = window['rotLabels_' + s];
+      editInline(rl, function(val){
+        if(val && val !== 'Rotation ' + n) labels[n] = val; else delete labels[n];
+        window.qcRefreshGrid(s);
+      });
+    }
+  }, true);
+
+  /* ---------- a visible Page settings button on every session page ---------- */
+  function buildGear(){
+    var top = document.querySelector('.top'); if(!top || document.getElementById('qcGear')) return;
+    var b = document.createElement('button');
+    b.id = 'qcGear'; b.type = 'button'; b.className = 'qcNoSnap'; b.title = 'Page settings: rename nets, rotations and section headings';
+    b.innerHTML = '&#9881;<span class="gl">Page settings</span>';
+    b.addEventListener('click', function(){ if(typeof window.qcOpenSettings === 'function') window.qcOpenSettings(); });
+    top.appendChild(b);
+  }
+  function gearVisibility(){
+    var g = document.getElementById('qcGear'), st = document.getElementById('sessionTemplate');
+    if(g && st) g.style.display = (st.value === 'Season Schedule') ? 'none' : '';
+  }
+  document.addEventListener('DOMContentLoaded', function(){ buildGear(); gearVisibility(); });
+  document.addEventListener('change', gearVisibility, true);
+  setInterval(gearVisibility, 700);
+
+  /* ---------- keep the gear / helper UI out of saved snapshot images ---------- */
+  function wrapSnap(){
+    var lib = window.htmlToImage; if(!lib || lib.__qcWrapped) return;
+    ['toPng','toJpeg','toBlob','toCanvas','toSvg'].forEach(function(k){
+      var f = lib[k]; if(typeof f !== 'function') return;
+      try{
+        lib[k] = function(node, opts){
+          opts = Object.assign({}, opts || {});
+          var prev = opts.filter;
+          opts.filter = function(n){ if(n && n.classList && n.classList.contains('qcNoSnap')) return false; return prev ? prev(n) : true; };
+          return f.call(this, node, opts);
+        };
+      }catch(e){}
+    });
+    lib.__qcWrapped = true;
+  }
+  window.addEventListener('load', wrapSnap); wrapSnap();
+})();
 </script>
 
 
