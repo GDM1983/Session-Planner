@@ -4267,13 +4267,7 @@ document.addEventListener('DOMContentLoaded',function(){
 .net-title[data-qc-editing],.rot-label[data-qc-editing]{background:#fff!important;color:var(--navy)!important;-webkit-text-fill-color:var(--navy)!important;caret-color:var(--navy)!important;
   border-radius:5px;padding:2px 6px;outline:2px solid var(--gold);text-transform:none;letter-spacing:0;min-width:60px;display:inline-block;}
 .net-title:hover{opacity:.85;}
-/* page-settings gear, top-left of the header on every session page */
-#qcGear{position:absolute;top:14px;left:16px;z-index:5;border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.14);color:#fff;
-  border-radius:999px;padding:7px 13px;font:inherit;font-size:12.5px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;}
-#qcGear:hover{background:rgba(255,255,255,.26);}
-.top{position:relative;}
-@media (max-width:640px){ #qcGear .gl{display:none;} #qcGear{padding:7px 10px;} }
-@media print{ #qcGear,.qcNoSnap{display:none!important;} }
+@media print{ .qcNoSnap{display:none!important;} }
 </style>
 <script>
 (function(){
@@ -4332,23 +4326,6 @@ document.addEventListener('DOMContentLoaded',function(){
       });
     }
   }, true);
-
-  /* ---------- a visible Page settings button on every session page ---------- */
-  function buildGear(){
-    var top = document.querySelector('.top'); if(!top || document.getElementById('qcGear')) return;
-    var b = document.createElement('button');
-    b.id = 'qcGear'; b.type = 'button'; b.className = 'qcNoSnap'; b.title = 'Page settings: rename nets, rotations and section headings';
-    b.innerHTML = '&#9881;<span class="gl">Page settings</span>';
-    b.addEventListener('click', function(){ if(typeof window.qcOpenSettings === 'function') window.qcOpenSettings(); });
-    top.appendChild(b);
-  }
-  function gearVisibility(){
-    var g = document.getElementById('qcGear'), st = document.getElementById('sessionTemplate');
-    if(g && st) g.style.display = (st.value === 'Season Schedule') ? 'none' : '';
-  }
-  document.addEventListener('DOMContentLoaded', function(){ buildGear(); gearVisibility(); });
-  document.addEventListener('change', gearVisibility, true);
-  setInterval(gearVisibility, 700);
 
   /* ---------- keep the gear / helper UI out of saved snapshot images ---------- */
   function wrapSnap(){
