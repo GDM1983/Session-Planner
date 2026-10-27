@@ -4260,11 +4260,23 @@ document.addEventListener('DOMContentLoaded',function(){
 <!-- ==================== NET HEADINGS: EDIT IN PLACE + READABLE TYPING + SETTINGS BUTTON ==================== -->
 <style>
 /* typing in the box under a net heading: it used to turn solid white while the text stayed white */
-.net-purpose:focus{background:rgba(255,255,255,.22)!important;color:#fff!important;-webkit-text-fill-color:#fff!important;caret-color:var(--gold)!important;box-shadow:0 0 0 2px var(--gold)!important;}
+th.net-col .net-purpose:focus, .net-purpose:focus{background:#fff!important;color:var(--navy)!important;-webkit-text-fill-color:var(--navy)!important;caret-color:var(--maroon)!important;
+  opacity:1!important;text-shadow:none!important;box-shadow:0 0 0 2px var(--gold)!important;outline:none!important;}
+th.net-col .net-purpose:focus *{color:var(--navy)!important;-webkit-text-fill-color:var(--navy)!important;}
 /* safety net for any other light-text box on a dark background */
-.net-name [contenteditable]:focus,.gpanel .ghead [contenteditable]:focus{color:#fff!important;-webkit-text-fill-color:#fff!important;caret-color:var(--gold)!important;}
+.net-name [contenteditable]:not([data-qc-editing]):focus,.gpanel .ghead [contenteditable]:focus{color:#fff!important;-webkit-text-fill-color:#fff!important;caret-color:var(--gold)!important;}
+
+/* compact net grid: columns hug their names, so the gap after the last name matches the gap before the first */
+.net-grid{width:auto;}
+.net-grid .corner{width:104px;}
+.net-grid td.rot-label{width:104px;min-width:104px;white-space:nowrap;}
+.net-grid th.net-col{min-width:120px;}
+.net-grid td.net-cell{padding:8px;}
+.net-cell .role-box{max-width:240px;}
+.role-box .role-pills{padding:5px;gap:4px;}
+.net-cell .npill{padding:3px 10px;}
 /* in-place rename of a net heading / rotation label */
-.net-title[data-qc-editing],.rot-label[data-qc-editing]{background:#fff!important;color:var(--navy)!important;-webkit-text-fill-color:var(--navy)!important;caret-color:var(--navy)!important;
+.net-name .net-title[data-qc-editing],.net-title[data-qc-editing],.rot-label[data-qc-editing]{background:#fff!important;color:var(--navy)!important;-webkit-text-fill-color:var(--navy)!important;caret-color:var(--navy)!important;
   border-radius:5px;padding:2px 6px;outline:2px solid var(--gold);text-transform:none;letter-spacing:0;min-width:60px;display:inline-block;}
 .net-title:hover{opacity:.85;}
 @media print{ .qcNoSnap{display:none!important;} }
@@ -4344,6 +4356,240 @@ document.addEventListener('DOMContentLoaded',function(){
     lib.__qcWrapped = true;
   }
   window.addEventListener('load', wrapSnap); wrapSnap();
+})();
+</script>
+
+
+<!-- ==================== COLLAPSIBLE SESSION OVERVIEW ==================== -->
+<style>
+h2.qc-collapsible{cursor:pointer;user-select:none;-webkit-user-select:none;display:flex!important;align-items:center;gap:8px;}
+h2.qc-collapsible::after{content:"Hide  \25B2";margin-left:auto;flex:0 0 auto;font-size:10.5px;font-weight:800;letter-spacing:.4px;text-transform:uppercase;
+  color:var(--maroon);background:var(--tint);border:1px solid var(--line);border-radius:999px;padding:4px 11px;white-space:pre;}
+.card.qc-collapsed > h2.qc-collapsible::after{content:"Show  \25BC";background:var(--gold);color:var(--maroon-deep);border-color:var(--gold);}
+h2.qc-collapsible:hover{opacity:.85;}
+h2.qc-collapsible:focus-visible{outline:2px solid var(--gold);outline-offset:3px;border-radius:4px;}
+.card.qc-collapsed > :not(h2){display:none!important;}
+.card.qc-collapsed > h2{margin-bottom:0!important;}
+@media print{ h2.qc-collapsible::after{display:none;} }
+</style>
+<script>
+(function(){
+  var KEY = 'qc_collapsed_v1';
+  function load(){ try{ return JSON.parse(localStorage.getItem(KEY)) || {}; }catch(e){ return {}; } }
+  function save(m){ try{ localStorage.setItem(KEY, JSON.stringify(m)); }catch(e){} }
+  var BODIES = ['body-preseason','body-leadership','body-champnet','body-champcw'];
+
+  function setup(){
+    var saved = load();
+    BODIES.forEach(function(id){
+      var body = document.getElementById(id); if(!body) return;
+      [].forEach.call(body.querySelectorAll('.card > h2'), function(h){
+        var orig = (h.dataset.qcOrig || h.textContent).trim().toLowerCase();
+        if(orig !== 'session overview' || h.classList.contains('qc-collapsible')) return;
+        h.classList.add('qc-collapsible');
+        h.setAttribute('role', 'button'); h.setAttribute('tabindex', '0');
+        h.title = 'Click to show / hide';
+        var card = h.parentNode;
+        function apply(collapsed){
+          card.classList.toggle('qc-collapsed', collapsed);
+          h.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        }
+        apply(!!saved[id]);
+        function toggle(){
+          var c = !card.classList.contains('qc-collapsed'); apply(c);
+          var m = load(); if(c) m[id] = 1; else delete m[id]; save(m);
+        }
+        h.addEventListener('click', toggle);
+        h.addEventListener('keydown', function(e){ if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); toggle(); } });
+      });
+    });
+  }
+  document.addEventListener('DOMContentLoaded', setup);
+  window.addEventListener('load', setup);
+  setup();
+})();
+</script>
+
+
+<!-- ==================== CLICK-TO-ASSIGN PLAYER PICKER (all net / scenario boxes) ==================== -->
+<style>
+body:not(.placing) .net-cell .role-pills, body:not(.placing) .scenario-role-zone{cursor:pointer;}
+body:not(.placing) .net-cell .role-pills:hover, body:not(.placing) .scenario-role-zone:hover{box-shadow:inset 0 0 0 1px rgba(253,183,39,.85);}
+.qcPop{position:fixed;z-index:70;width:280px;max-width:calc(100vw - 16px);max-height:min(360px,60vh);display:flex;flex-direction:column;
+  background:#fff;border:1px solid var(--line,#e3dfe6);border-radius:12px;box-shadow:0 14px 34px rgba(20,15,25,.30);font-size:13px;color:var(--navy,#16223C);overflow:hidden;}
+.qcPopHead{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 10px 7px 12px;background:var(--tint,#f4eef1);
+  font-size:10.5px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;color:var(--maroon,#79133E);}
+.qcPopDone{border:0;border-radius:999px;background:var(--maroon,#79133E);color:#fff;font:inherit;font-size:10.5px;font-weight:800;letter-spacing:.4px;padding:4px 11px;cursor:pointer;}
+.qcPopSearch{margin:8px 10px 4px;border:1px solid var(--line,#e3dfe6);border-radius:8px;padding:8px 10px;font:inherit;font-size:16px;color:var(--navy,#16223C);background:#fff;outline:none;}
+.qcPopSearch:focus{border-color:var(--gold,#FDB727);box-shadow:0 0 0 2px rgba(253,183,39,.35);}
+.qcPopBody{overflow-y:auto;padding:2px 6px 8px;-webkit-overflow-scrolling:touch;}
+.qcPopSec{font-size:9.5px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:#7a7488;padding:8px 6px 3px;}
+.qcPopIn{display:flex;flex-wrap:wrap;gap:5px;padding:2px 4px 4px;}
+.qcPopChip{display:inline-flex;align-items:center;gap:6px;background:#fff;border:1px solid rgba(0,0,0,.12);border-radius:999px;padding:3px 6px 3px 11px;font-weight:700;font-size:12px;}
+.qcPopChip button{border:0;background:transparent;color:var(--rust,#BB6532);font-weight:800;font-size:13px;line-height:1;cursor:pointer;padding:0 2px;}
+.qcPopRow{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;text-align:left;border:0;background:transparent;border-radius:8px;
+  padding:8px 8px;font:inherit;font-weight:600;color:var(--navy,#16223C);cursor:pointer;}
+.qcPopRow:hover,.qcPopRow:focus{background:#fdf3d8;outline:none;}
+.qcPopRow[disabled]{color:#a29cb0;cursor:not-allowed;background:transparent;}
+.qcPopRow small{font-size:10.5px;font-weight:600;color:#a29cb0;white-space:nowrap;}
+.qcPopNone{padding:8px 8px;color:#7a7488;font-size:12px;}
+@media print{ .qcPop{display:none!important;} }
+</style>
+<script>
+(function(){
+  var pop = null, ctx = null, listEl = null, searchEl = null, titleEl = null;
+  var ROLE = {Batting:'Bat', Bowling:'Bowl'};
+
+  function secOf(zone){
+    if(zone.closest('#netGridBody-lp')) return 'LP';
+    if(zone.closest('#netGridBody-cn')) return 'CN';
+    if(zone.closest('#scenariosContainer-cw')) return 'CW';
+    return '';
+  }
+  function describe(zone){
+    var s = secOf(zone); if(!s) return null;
+    if(s === 'CW') return {s:s, id:zone.getAttribute('data-id'), role:zone.getAttribute('data-role')};
+    var cell = zone.closest('.net-cell'); if(!cell) return null;
+    return {s:s, r:cell.getAttribute('data-r'), net:cell.getAttribute('data-net'), role:zone.getAttribute('data-role')};
+  }
+  function findZone(c){
+    if(c.s === 'CW'){
+      var zs = document.querySelectorAll('#scenariosContainer-cw .scenario-role-zone');
+      for(var i=0;i<zs.length;i++) if(zs[i].getAttribute('data-id')===c.id && zs[i].getAttribute('data-role')===c.role) return zs[i];
+      return null;
+    }
+    var cells = document.querySelectorAll('#netGridBody-' + c.s.toLowerCase() + ' td.net-cell');
+    for(var j=0;j<cells.length;j++){
+      if(cells[j].getAttribute('data-r')===c.r && cells[j].getAttribute('data-net')===c.net){
+        var z = cells[j].querySelectorAll('.role-pills');
+        for(var k=0;k<z.length;k++) if(z[k].getAttribute('data-role')===c.role) return z[k];
+      }
+    }
+    return null;
+  }
+  function allNames(c){ var f = window['availableNames_' + c.s]; return f ? f() : []; }
+  function inThisBox(c, nm){
+    if(c.s === 'CW'){ var a = window.scenarioAssignments_CW && scenarioAssignments_CW[c.id]; return !!(a && (a[c.role]||[]).indexOf(nm) !== -1); }
+    return window['hasAssign_' + c.s](nm, c.r, c.net, c.role);
+  }
+  // nets: a player may appear once per rotation, so report where else they already are
+  function elsewhere(c, nm){
+    if(c.s === 'CW') return '';
+    var nets = window['netsList_' + c.s] || [], has = window['hasAssign_' + c.s];
+    for(var i=0;i<nets.length;i++) for(var role in ROLE){
+      if(nets[i]===c.net && role===c.role) continue;
+      if(has(nm, c.r, nets[i], role)) return nets[i] + ' \u00B7 ' + ROLE[role];
+    }
+    return '';
+  }
+  function rotName(c, zone){
+    if(c.s === 'CW'){
+      var t = zone && zone.closest('.scenario-card') && zone.closest('.scenario-card').querySelector('.scenario-title');
+      return t ? t.textContent : 'Scenario';
+    }
+    var lab = window['rotLabels_' + c.s] || {};
+    return lab[c.r] || ('Rotation ' + c.r);
+  }
+  function esc(t){ return String(t).replace(/[&<>"]/g, function(m){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]; }); }
+
+  function close(){ if(pop){ pop.remove(); pop = null; ctx = null; } }
+
+  function place(){
+    if(!pop || !ctx) return;
+    var z = findZone(ctx); if(!z){ close(); return; }
+    var r = z.getBoundingClientRect(), vw = window.innerWidth, vh = window.innerHeight;
+    var w = Math.min(pop.offsetWidth || 280, vw - 16), h = pop.offsetHeight || 300;
+    var left = Math.max(8, Math.min(r.left, vw - w - 8));
+    var below = vh - r.bottom - 8, above = r.top - 8, top;
+    if(below >= Math.min(h, 220) || below >= above) top = r.bottom + 6; else top = Math.max(8, r.top - h - 6);
+    top = Math.max(8, Math.min(top, vh - h - 8));
+    pop.style.left = left + 'px'; pop.style.top = top + 'px';
+  }
+
+  function build(){
+    var zone = findZone(ctx); if(!zone){ close(); return; }
+    var q = (searchEl && searchEl.value || '').toLowerCase().trim();
+    var names = allNames(ctx), here = [], free = [], blocked = [];
+    names.forEach(function(nm){
+      if(inThisBox(ctx, nm)){ here.push(nm); return; }
+      var where = elsewhere(ctx, nm);
+      if(where) blocked.push({nm:nm, where:where}); else free.push(nm);
+    });
+    function ok(nm){ return !q || nm.toLowerCase().indexOf(q) !== -1; }
+    var rot = rotName(ctx, zone);
+    titleEl.textContent = (ctx.s === 'CW' ? rot : rot + ' \u00B7 ' + ctx.net) + ' \u00B7 ' + (ctx.role === 'Batting' ? 'Batters' : 'Bowlers');
+    var h = '';
+    if(here.length){
+      h += '<div class="qcPopSec">In this box (' + here.length + ')</div><div class="qcPopIn">' +
+        here.map(function(nm){ return '<span class="qcPopChip">' + esc(nm) + '<button type="button" data-rm="' + esc(nm) + '" title="Remove">\u2715</button></span>'; }).join('') + '</div>';
+    }
+    var f = free.filter(ok);
+    h += '<div class="qcPopSec">' + (ctx.s === 'CW' ? 'Add a player' : 'Not yet in ' + esc(rot)) + ' (' + free.length + ')</div>';
+    h += f.length ? f.map(function(nm){ return '<button type="button" class="qcPopRow" data-add="' + esc(nm) + '">' + esc(nm) + '</button>'; }).join('')
+                  : '<div class="qcPopNone">' + (free.length ? 'No match' : (names.length ? 'Everyone is already in this rotation' : 'No available players yet \u2014 mark players Available in the roster')) + '</div>';
+    var b = blocked.filter(function(x){ return ok(x.nm); });
+    if(b.length){
+      h += '<div class="qcPopSec">Already in ' + esc(rot) + '</div>' +
+        b.map(function(x){ return '<button type="button" class="qcPopRow" disabled>' + esc(x.nm) + '<small>' + esc(x.where) + '</small></button>'; }).join('');
+    }
+    var keep = listEl.scrollTop;
+    listEl.innerHTML = h; listEl.scrollTop = keep;
+    place();
+  }
+
+  function open(zone){
+    var c = describe(zone); if(!c) return;
+    close(); ctx = c;
+    pop = document.createElement('div'); pop.className = 'qcPop qcNoSnap';
+    pop.innerHTML = '<div class="qcPopHead"><span class="qcPopTitle"></span><button type="button" class="qcPopDone">Done</button></div>' +
+      '<input class="qcPopSearch" type="text" placeholder="Type to find a player\u2026" autocomplete="off">' +
+      '<div class="qcPopBody"></div>';
+    document.body.appendChild(pop);
+    titleEl = pop.querySelector('.qcPopTitle'); searchEl = pop.querySelector('.qcPopSearch'); listEl = pop.querySelector('.qcPopBody');
+    pop.querySelector('.qcPopDone').addEventListener('click', close);
+    searchEl.addEventListener('input', build);
+    searchEl.addEventListener('keydown', function(e){
+      if(e.key === 'Enter'){ var first = listEl.querySelector('.qcPopRow[data-add]'); if(first) first.click(); }
+    });
+    pop.addEventListener('click', function(e){
+      e.qcInside = true;   // the list is re-drawn below, so the clicked row is detached by the time this reaches document
+      var add = e.target.closest('[data-add]'), rm = e.target.closest('[data-rm]');
+      var zone2 = findZone(ctx); if(!zone2) return;
+      if(add){
+        window.__dropNameIntoZone(zone2, add.getAttribute('data-add'));   // existing add + save + re-render path
+        build(); if(searchEl.value){ searchEl.value=''; build(); } searchEl.focus();
+      } else if(rm){
+        var nm = rm.getAttribute('data-rm'), s = ctx.s;
+        if(s === 'CW'){ removePlayerFromScenario_CW(ctx.id, ctx.role, nm); saveState_CW(); renderScenarios_CW(); }
+        else { window['removeAssign_' + s](nm, ctx.r, ctx.net, ctx.role); window['saveState_' + s](); window['renderNetGrid_' + s](window['availableNames_' + s]()); }
+        build();
+      }
+    });
+    build();
+    // wait a frame so layout is final, then focus (avoid iOS jump)
+    requestAnimationFrame(function(){ place(); if(searchEl && window.matchMedia('(hover:hover)').matches) searchEl.focus({preventScroll:true}); });
+  }
+
+  // open from a click on a net box / scenario box (not on an existing name, which still removes it as before)
+  document.addEventListener('click', function(e){
+    var t = e.target; if(!t.closest) return;
+    if(e.qcInside || (pop && pop.contains(t))) return;
+    var zone = t.closest('.role-pills, .scenario-role-zone');
+    if(pop){
+      var same = zone && ctx && findZone(ctx) === zone;
+      close();
+      if(same) return;              // second click on the same box closes it
+    }
+    if(!zone || !secOf(zone)) return;
+    if(document.body.classList.contains('placing')) return;     // "tap a name, then tap a slot" mode owns clicks
+    if(t.closest('.npill') && secOf(zone) !== 'CW') return;      // net pills keep their click-to-remove
+    if(t.closest('.rm')) return;
+    open(zone);
+  });
+  document.addEventListener('keydown', function(e){ if(e.key === 'Escape' && pop){ close(); } });
+  window.addEventListener('resize', place);
+  window.addEventListener('scroll', place, true);
+  window.addEventListener('beforeprint', close);
 })();
 </script>
 
