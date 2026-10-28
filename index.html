@@ -3448,9 +3448,42 @@ document.addEventListener('DOMContentLoaded',function(){
       }
       return res.json();
     }).then(function(data){
-      return (data && typeof data==='object') ? data : {};
+      return (data && typeof data==='object') ? zDecodeLibrary(data) : {};
     });
   }
+
+  /* ---- compact storage ------------------------------------------------------------------------------
+     The whole library (sessions, squads, schedule) lives in ONE JSONBin record and free accounts refuse
+     records over 100 KB. Session pages are mostly repeated markup, so the library is gzip-compressed and
+     stored as {"_z":1,"d":"<base64>"}. Old uncompressed libraries are still read as normal, and the next
+     save converts them. Browsers without CompressionStream simply keep saving uncompressed. */
+  function zOK(){ return typeof CompressionStream==='function' && typeof DecompressionStream==='function' && typeof Response==='function' && typeof Blob==='function'; }
+  function bytesToB64(u8){ var out='', CH=0x8000; for(var i=0;i<u8.length;i+=CH) out+=String.fromCharCode.apply(null,u8.subarray(i,i+CH)); return btoa(out); }
+  function b64ToBytes(b64){ var bin=atob(b64), u8=new Uint8Array(bin.length); for(var i=0;i<bin.length;i++) u8[i]=bin.charCodeAt(i); return u8; }
+  function isPlain(o){ return o && typeof o==='object' && !Array.isArray(o); }
+  function mergeInto(base, extra){   // anything an older (uncompressed) copy of the page added beside the compressed block is kept
+    Object.keys(extra).forEach(function(k){
+      if(isPlain(base[k]) && isPlain(extra[k])) mergeInto(base[k], extra[k]); else if(!(k in base)) base[k]=extra[k];
+    });
+    return base;
+  }
+  function zDecodeLibrary(data){
+    if(!(data && data._z===1 && typeof data.d==='string')) return data;
+    if(!zOK()) throw new Error('This browser is too old to open the compressed library');
+    var extra={}; Object.keys(data).forEach(function(k){ if(k!=='_z' && k!=='d' && k!=='alg') extra[k]=data[k]; });
+    var ds=new Blob([b64ToBytes(data.d)]).stream().pipeThrough(new DecompressionStream('gzip'));
+    return new Response(ds).text().then(function(t){ return mergeInto(JSON.parse(t), extra); });
+  }
+  function zEncodeLibrary(obj){
+    var json=JSON.stringify(obj);
+    if(!zOK()) return Promise.resolve(json);
+    var cs=new Blob([new TextEncoder().encode(json)]).stream().pipeThrough(new CompressionStream('gzip'));
+    return new Response(cs).arrayBuffer().then(function(buf){
+      var packed=JSON.stringify({_z:1, alg:'gzip-b64', d:bytesToB64(new Uint8Array(buf))});
+      return packed.length < json.length ? packed : json;
+    }).catch(function(){ return json; });
+  }
+  window.qcZ={encode:zEncodeLibrary, decode:zDecodeLibrary};
 
   /* turn a refused request into an Error that carries the status, the service's own explanation and the library size */
   function archiveFail(res, bytes){
@@ -3462,7 +3495,9 @@ document.addEventListener('DOMContentLoaded',function(){
     });
   }
   function archivePut(fullData){
-    var body=JSON.stringify(fullData);
+    return zEncodeLibrary(fullData).then(function(body){ return archivePutBody(body); });
+  }
+  function archivePutBody(body){
     return fetch(JSONBIN_BASE, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_API_KEY },
