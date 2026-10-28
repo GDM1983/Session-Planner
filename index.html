@@ -4349,9 +4349,11 @@ th.net-col .net-purpose:focus *{color:var(--navy)!important;-webkit-text-fill-co
 .net-grid{width:auto;}
 .net-grid .corner{width:104px;}
 .net-grid td.rot-label{width:104px;min-width:104px;white-space:nowrap;}
-.net-grid th.net-col{min-width:120px;}
+.net-grid th.net-col{min-width:170px;}
 .net-grid td.net-cell{padding:8px;}
-.net-cell .role-box{max-width:240px;}
+/* no single column may grab the page: long purpose text wraps inside its column instead of widening it */
+th.net-col .net-purpose{width:100%;max-width:260px;box-sizing:border-box;overflow-wrap:anywhere;white-space:pre-wrap;}
+.net-cell .role-box{width:100%;max-width:260px;box-sizing:border-box;}
 .role-box .role-pills{padding:5px;gap:4px;}
 .net-cell .npill{padding:3px 10px;}
 /* in-place rename of a net heading / rotation label */
