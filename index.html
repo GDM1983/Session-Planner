@@ -1246,7 +1246,31 @@ table.sched td.rmCell{text-align:center;}
   // ============================================================
   // Key is tied to THIS file's path, so duplicated/dated copies each keep their
   // own independent saved plan (local file:// pages otherwise share one storage area).
-  var LS_KEY='qldPlanner_v35_state::' + ((typeof location!=='undefined' && (location.pathname||location.href)) || '');
+  /* Hosted (http/https): the key follows the site folder/repo, NOT the file name, so renaming the file on GitHub
+     doesn't hide saved work. Local file:// copies still use the full path so each copy keeps its own plan. */
+  var LS_PREFIX='qldPlanner_v35_state::';
+  var LS_KEY=(function(){
+    try{
+      var pn=location.pathname||'';
+      if(location.protocol==='file:') return LS_PREFIX+(pn||location.href);
+      var seg=pn.split('/').filter(Boolean)[0]||'';
+      if(/\.html?$/i.test(seg)) seg='';
+      var key=LS_PREFIX+'/'+(seg?seg+'/':'');
+      // one-time carry-over from the old file-name-based key (any earlier name in this same folder)
+      if(localStorage.getItem(key)===null){
+        var best=null, bestLen=-1, base=LS_PREFIX+'/'+(seg?seg+'/':'');
+        for(var i=0;i<localStorage.length;i++){
+          var k=localStorage.key(i);
+          if(!k || k===key || k.indexOf(base)!==0) continue;
+          var v=localStorage.getItem(k)||'';
+          if(k===LS_PREFIX+pn){ best=v; bestLen=Infinity; break; }
+          if(v.length>bestLen){ best=v; bestLen=v.length; }
+        }
+        if(best!==null) localStorage.setItem(key,best);
+      }
+      return key;
+    }catch(e){ return LS_PREFIX+((typeof location!=='undefined' && (location.pathname||location.href)) || ''); }
+  })();
   var saveEnabled=false, saveTimer=null;
   function collectState(){
     var chips=[].slice.call(document.querySelectorAll('#roster .chip')).map(function(c){
@@ -1609,7 +1633,7 @@ document.addEventListener('DOMContentLoaded',function(){
     var se=document.querySelector('.session-edit'); if(se) session=se.textContent.trim();
     var dEl=document.getElementById('sessionDateInput');
     if(dEl && dEl.value){ var dt=new Date(dEl.value+'T00:00:00'); if(!isNaN(dt)) date=dt.toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long',year:'numeric'}); }
-    var parts=['QLD Cricket','Leadership / Skill Development'];
+    var parts=['QLD Cricket',(window.qcPageTitle?qcPageTitle('Leadership / Skill Development'):'Leadership / Skill Development')];
     if(week) parts.push('Week '+week);
     if(session) parts.push('Session '+session);
     if(date) parts.push(date);
@@ -2062,7 +2086,7 @@ document.addEventListener('DOMContentLoaded',function(){
     var se=document.querySelector('.session-edit'); if(se) session=se.textContent.trim();
     var dEl=document.getElementById('sessionDateInput');
     if(dEl && dEl.value){ var dt=new Date(dEl.value+'T00:00:00'); if(!isNaN(dt)) date=dt.toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long',year:'numeric'}); }
-    var parts=['QLD Cricket','Preparation Phase - Nets/Fielding'];
+    var parts=['QLD Cricket',(window.qcPageTitle?qcPageTitle('Skill Development - Nets'):'Preparation Phase - Nets/Fielding')];
     if(week) parts.push('Week '+week);
     if(session) parts.push('Session '+session);
     if(date) parts.push(date);
@@ -2449,7 +2473,7 @@ document.addEventListener('DOMContentLoaded',function(){
     var se=document.querySelector('.session-edit'); if(se) session=se.textContent.trim();
     var dEl=document.getElementById('sessionDateInput');
     if(dEl && dEl.value){ var dt=new Date(dEl.value+'T00:00:00'); if(!isNaN(dt)) date=dt.toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long',year:'numeric'}); }
-    var parts=['QLD Cricket','Preparation Phase - Centre Wicket Scenarios'];
+    var parts=['QLD Cricket',(window.qcPageTitle?qcPageTitle('Centre Wicket Scenarios'):'Preparation Phase - Centre Wicket Scenarios')];
     if(week) parts.push('Week '+week);
     if(session) parts.push('Session '+session);
     if(date) parts.push(date);
@@ -4173,6 +4197,35 @@ document.addEventListener('DOMContentLoaded',function(){
     }
   });
 
+  /* ---------- page titles (the names in the header menu) ----------
+     The menu entries keep their internal value (so saved plans, filing and page switching never break);
+     only the words shown to the coach change. */
+  var TKEY = 'qc_page_titles_v1';
+  function loadT(){ try{ return JSON.parse(localStorage.getItem(TKEY)) || {}; }catch(e){ return {}; } }
+  function titleOpts(){
+    var st = document.getElementById('sessionTemplate'); if(!st) return [];
+    return [].map.call(st.options, function(o){
+      if(o.dataset.qcVal == null){ o.dataset.qcVal = o.value; o.dataset.qcDefault = o.text; o.setAttribute('value', o.value); }
+      return o;
+    });
+  }
+  function applyTitles(){
+    var t = loadT();
+    titleOpts().forEach(function(o){
+      var want = (t[o.dataset.qcVal] && String(t[o.dataset.qcVal]).trim()) || o.dataset.qcDefault;
+      if(o.text !== want) o.text = want;
+    });
+  }
+  window.qcPageTitle = function(value){
+    var t = loadT(), v = (t[value] && String(t[value]).trim());
+    if(v) return v;
+    var hit = titleOpts().filter(function(o){ return o.dataset.qcVal === value; })[0];
+    return hit ? hit.dataset.qcDefault : value;
+  };
+  titleOpts();                                   // pin each option's value before anything can depend on its text
+  document.addEventListener('DOMContentLoaded', function(){ applyTitles(); if(typeof syncPageTitle === 'function'){ try{ syncPageTitle(); }catch(e){} } });
+  window.addEventListener('load', applyTitles);
+
   /* ---------- the settings panel ---------- */
   window.qcOpenSettings = function(){
     if(document.getElementById('qcSettings')) return;
@@ -4181,6 +4234,7 @@ document.addEventListener('DOMContentLoaded',function(){
     var heads = headingEls(bodyId), saved = (loadH()[bodyId] || {});
     var nets = (s === 'LP' || s === 'CN') ? window['netsList_' + s].slice() : null;
     var rotN = nets ? window['rotationCount_' + s] : 0, labels = nets ? Object.assign({}, window['rotLabels_' + s]) : {};
+    var titles = Object.assign({}, loadT());
 
     var ov = document.createElement('div'); ov.className = 'archOverlay qcSetOverlay'; ov.id = 'qcSettings';
     ov.innerHTML = '<div class="archModal"><div class="archModalHead"><span>&#9881; Page settings &mdash; ' + esc(pageName) + '</span><button class="archModalX" type="button" data-a="close">&#10005;</button></div>' +
@@ -4190,6 +4244,13 @@ document.addEventListener('DOMContentLoaded',function(){
 
     function draw(){
       var h = '';
+      h += '<div class=\"qcSetSec\"><h4>Page titles (header menu)</h4>';
+      titleOpts().forEach(function(o, oi){
+        var v = o.dataset.qcVal;
+        h += '<div class=\"qcSetRow\"><label title=\"' + esc(o.dataset.qcDefault) + '\">Page ' + (oi + 1) + '</label><input data-title=\"' + esc(v) + '\" placeholder=\"' + esc(o.dataset.qcDefault) + '\" value=\"' + esc(titles[v] || '') + '\"></div>';
+      });
+      h += '<div class=\"qcSetBtns\"><button class=\"btn ghost\" type=\"button\" data-a=\"resettitles\">Reset titles to default</button></div>' +
+           '<p class=\"qcSetNote\">These are the names in the page menu at the top. Saved sessions and filing are unaffected, and your names are kept after Restore.</p></div>';
       if(nets){
         h += '<div class="qcSetSec"><h4>Net / station names</h4>';
         nets.forEach(function(n, i){ h += '<div class="qcSetRow"><label>Net ' + (i + 1) + '</label><input data-net="' + i + '" value="' + esc(n) + '"></div>'; });
@@ -4211,6 +4272,7 @@ document.addEventListener('DOMContentLoaded',function(){
       ov.querySelector('#qcSetBody').innerHTML = h;
     }
     function grab(){   // read the inputs back into the working copies before any redraw
+      ov.querySelectorAll('input[data-title]').forEach(function(i){ var v = i.value.trim(); if(v) titles[i.getAttribute('data-title')] = v; else delete titles[i.getAttribute('data-title')]; });
       ov.querySelectorAll('input[data-net]').forEach(function(i){ nets[+i.getAttribute('data-net')] = i.value; });
       ov.querySelectorAll('input[data-rot]').forEach(function(i){ var v = i.value.trim(); if(v) labels[+i.getAttribute('data-rot')] = v; else delete labels[+i.getAttribute('data-rot')]; });
     }
@@ -4226,8 +4288,18 @@ document.addEventListener('DOMContentLoaded',function(){
       if(a === 'rmnet'){ grab(); if(nets.length <= 1){ alert('At least one net is required.'); return; } nets.pop(); draw(); return; }
       if(a === 'addrot'){ grab(); rotN++; draw(); return; }
       if(a === 'rmrot'){ grab(); if(rotN <= 1){ alert('At least one rotation is required.'); return; } delete labels[rotN]; rotN--; draw(); return; }
+      if(a === 'resettitles'){ ov.querySelectorAll('input[data-title]').forEach(function(i){ i.value = ''; }); return; }
       if(a === 'resethead'){ ov.querySelectorAll('input[data-head]').forEach(function(i){ i.value = heads[+i.getAttribute('data-head')].dataset.qcOrig; }); return; }
       if(a === 'save'){
+        grab();
+        var shown = {}, bad = false;
+        titleOpts().forEach(function(o){
+          var nm = ((titles[o.dataset.qcVal] || o.dataset.qcDefault) + '').trim().toLowerCase();
+          if(shown[nm]) bad = true; shown[nm] = 1;
+        });
+        if(bad){ alert('Each page needs a different title.'); return; }
+        try{ if(Object.keys(titles).length) localStorage.setItem(TKEY, JSON.stringify(titles)); else localStorage.removeItem(TKEY); }catch(err){}
+        applyTitles();
         if(nets){
           grab(); nets = nets.map(function(n){ return n.trim(); });
           if(!uniqueOk(nets)){ alert('Each net needs a different, non-empty name.'); return; }
