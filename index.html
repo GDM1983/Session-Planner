@@ -3444,7 +3444,7 @@ document.addEventListener('DOMContentLoaded',function(){
     }).then(function(res){
       if(!res.ok){
         if(res.status===404) return {};
-        throw new Error('HTTP '+res.status);
+        return archiveFail(res, 0);
       }
       return res.json();
     }).then(function(data){
@@ -3452,15 +3452,35 @@ document.addEventListener('DOMContentLoaded',function(){
     });
   }
 
+  /* turn a refused request into an Error that carries the status, the service's own explanation and the library size */
+  function archiveFail(res, bytes){
+    return res.text().then(function(t){
+      var msg=''; try{ msg=(JSON.parse(t)||{}).message||''; }catch(e){ msg=String(t||'').slice(0,160); }
+      var err=new Error('HTTP '+res.status+(msg?' \u2014 '+msg:''));
+      err.status=res.status; err.serverMessage=msg; err.sizeKB=bytes?Math.round(bytes/1024):0;
+      throw err;
+    });
+  }
   function archivePut(fullData){
+    var body=JSON.stringify(fullData);
     return fetch(JSONBIN_BASE, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_API_KEY },
-      body: JSON.stringify(fullData)
+      body: body
     }).then(function(res){
-      if(!res.ok) throw new Error('HTTP '+res.status);
+      if(!res.ok) return archiveFail(res, body.length);
       return res.json();
     });
+  }
+  function archiveErrorText(err){
+    var st=err&&err.status;
+    if(st===401||st===403||st===413||st===429){
+      return 'The online library refused this save (HTTP '+st+(err.serverMessage?': '+err.serverMessage:'')+'). '+
+        'That usually means the library service\u2019s storage or request limit has been reached, or its access key has changed'+
+        (err.sizeKB?' \u2014 the library is currently about '+err.sizeKB+' KB':'')+'. '+
+        'Your session is still safe on this device. Check the JSONBin account\u2019s usage and key.';
+    }
+    return 'Could not save \u2014 check your internet connection and try again. ('+(err&&err.message||'unknown error')+')';
   }
 
   function ensureShape(archive, year, phase){
@@ -3775,7 +3795,7 @@ document.addEventListener('DOMContentLoaded',function(){
       statusEl.className='archStatus archStatusOk';
       setTimeout(closeArchiveModal, 900);
     }).catch(function(err){
-      statusEl.textContent = 'Could not save \u2014 check your internet connection and try again. (' + err.message + ')';
+      statusEl.textContent = archiveErrorText(err);
       statusEl.className='archStatus archStatusErr';
     });
   }
