@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>QLD Youth — Session Planner</title>
+<title>QLD Cricket — Session Planner</title>
 <style>
   :root{
     --maroon:#79133E; --maroon-deep:#5E0E30; --navy:#16223C; --gold:#FDB727; --rust:#BB6532;
@@ -1304,7 +1304,7 @@ table.sched td.rmCell{text-align:center;}
       var dt=new Date(dEl.value+'T00:00:00');
       if(!isNaN(dt)) date=dt.toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
     }
-    var parts=['QLD Youth', type]; var _pg=(document.getElementById('programSelect')||{}).value; if(_pg) parts.push(_pg);
+    var parts=['QLD Cricket', type]; var _pg=(document.getElementById('programSelect')||{}).value; if(_pg) parts.push(_pg);
     if(week) parts.push('Week '+week);
     if(session) parts.push('Session '+session);
     if(date) parts.push(date);
@@ -1609,7 +1609,7 @@ document.addEventListener('DOMContentLoaded',function(){
     var se=document.querySelector('.session-edit'); if(se) session=se.textContent.trim();
     var dEl=document.getElementById('sessionDateInput');
     if(dEl && dEl.value){ var dt=new Date(dEl.value+'T00:00:00'); if(!isNaN(dt)) date=dt.toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long',year:'numeric'}); }
-    var parts=['QLD Youth','Leadership / Skill Development'];
+    var parts=['QLD Cricket','Leadership / Skill Development'];
     if(week) parts.push('Week '+week);
     if(session) parts.push('Session '+session);
     if(date) parts.push(date);
@@ -2062,7 +2062,7 @@ document.addEventListener('DOMContentLoaded',function(){
     var se=document.querySelector('.session-edit'); if(se) session=se.textContent.trim();
     var dEl=document.getElementById('sessionDateInput');
     if(dEl && dEl.value){ var dt=new Date(dEl.value+'T00:00:00'); if(!isNaN(dt)) date=dt.toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long',year:'numeric'}); }
-    var parts=['QLD Youth','Preparation Phase - Nets/Fielding'];
+    var parts=['QLD Cricket','Preparation Phase - Nets/Fielding'];
     if(week) parts.push('Week '+week);
     if(session) parts.push('Session '+session);
     if(date) parts.push(date);
@@ -2449,7 +2449,7 @@ document.addEventListener('DOMContentLoaded',function(){
     var se=document.querySelector('.session-edit'); if(se) session=se.textContent.trim();
     var dEl=document.getElementById('sessionDateInput');
     if(dEl && dEl.value){ var dt=new Date(dEl.value+'T00:00:00'); if(!isNaN(dt)) date=dt.toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long',year:'numeric'}); }
-    var parts=['QLD Youth','Preparation Phase - Centre Wicket Scenarios'];
+    var parts=['QLD Cricket','Preparation Phase - Centre Wicket Scenarios'];
     if(week) parts.push('Week '+week);
     if(session) parts.push('Session '+session);
     if(date) parts.push(date);
@@ -3303,7 +3303,7 @@ document.addEventListener('DOMContentLoaded',function(){
     PAGES.forEach(function(s){
       var el=document.getElementById('squadNote-'+s.toLowerCase()); if(!el) return;
       if(p){ el.innerHTML=''; el.style.display='none'; }
-      else { el.style.display=''; el.innerHTML='Choose a <b>Program</b> in the header (U17 / U19\u2026) to load that squad\u2019s players.'; }
+      else { el.style.display=''; el.innerHTML='Choose a <b>Program</b> in the header to load that squad\u2019s players.'; }
     });
   }
 
@@ -3556,10 +3556,17 @@ document.addEventListener('DOMContentLoaded',function(){
 
   /* ---- Program (age group, e.g. U17 / U19) ---- */
   var PROGRAM_LS='qc_program_v1', PROGRAM_LIST_LS='qc_programs_list_v1';
+  /* Built-in programs. Anything a coach has added themselves is kept after these. */
+  var DEFAULT_PROGRAMS=['U17','U19','Combined','Bulls','2nd XI'];
   function getPrograms(){
     var l=null; try{ l=JSON.parse(localStorage.getItem(PROGRAM_LIST_LS)); }catch(e){}
-    if(!Array.isArray(l) || !l.length) l=['U17','U19'];
-    return l;
+    if(!Array.isArray(l)) l=[];
+    var out=DEFAULT_PROGRAMS.slice();
+    l.forEach(function(x){
+      x=String(x||'').trim(); if(!x) return;
+      if(!out.some(function(o){ return o.toLowerCase()===x.toLowerCase(); })) out.push(x);
+    });
+    return out;
   }
   function addProgram(name){
     name=String(name||'').trim(); if(!name) return '';
@@ -3603,7 +3610,7 @@ document.addEventListener('DOMContentLoaded',function(){
     populateProgramSelect(saved);
     sel.addEventListener('change', function(){
       if(sel.value==='__add__'){
-        var n=prompt('New program name (e.g. U15, Girls U17):','');
+        var n=prompt('New program name (e.g. U15, Women\'s 1st XI):','');
         var name=addProgram(n);
         setHeaderProgram(name, true);
         if(window.qcProgramChanged) qcProgramChanged(name);
