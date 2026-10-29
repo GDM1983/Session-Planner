@@ -3421,7 +3421,8 @@ document.addEventListener('DOMContentLoaded',function(){
      archiveFetch()/archivePut() are the only functions that talk to the cloud.
      Access needs a coach sign-in; the Firestore rules decide who is allowed.
      ============================================================ */
-  var PHASES = ['Preseason Phase','Leadership Phase','Championship Preparation Phase'];
+  var PHASES = ['Preseason Phase','Leadership Phase','Championship Preparation Phase','Senior Sessions'];
+  var YOUTH_PHASES = PHASES.slice(0,3), SENIOR_PHASE = 'Senior Sessions';
 
   function phaseForTemplate(v){
     if(v==='Leadership / Skill Development') return 'Leadership Phase';
@@ -3994,6 +3995,7 @@ document.addEventListener('DOMContentLoaded',function(){
   function openSaveSessionModal(){
     var tEl=document.getElementById('sessionTemplate');
     var defaultPhase = currentSession.phase || phaseForTemplate(tEl?tEl.value:'');
+    if(defaultPhase===SENIOR_PHASE) defaultPhase = phaseForTemplate(tEl?tEl.value:'');
     var yearSel=document.getElementById('archiveYear');
     var defaultYear = currentSession.year || (yearSel?yearSel.value:String(new Date().getFullYear()));
     var defaultName = currentSession.sessionName || '';
@@ -4005,7 +4007,7 @@ document.addEventListener('DOMContentLoaded',function(){
       (isUpdating ? '<div class="archStatus">Currently editing <b>'+escapeHtmlArch(currentSession.sessionName)+'</b> <span class="archCurrentBadge">OPEN SESSION</span></div>' : '') +
       '<label class="archField">Session Name<input id="archSaveName" type="text" placeholder="e.g. Power Hitting Under Pressure" value="'+escapeHtmlArch(defaultName)+'"></label>' +
       '<label class="archField" id="archPhaseRow">Phase<select id="archSaveBucket">' +
-        PHASES.map(function(p){ return '<option value="'+p+'"'+(p===defaultPhase?' selected':'')+'>'+p+'</option>'; }).join('') +
+        YOUTH_PHASES.map(function(p){ return '<option value="'+p+'"'+(p===defaultPhase?' selected':'')+'>'+p+'</option>'; }).join('') +
       '</select></label>' +
       '<label class="archField">Program<select id="archSaveProgram"><option value="">(none)</option>' +
         getPrograms().map(function(p){ return '<option value="'+escapeHtmlArch(p)+'"'+(p===(currentSession.program||currentProgram())?' selected':'')+'>'+escapeHtmlArch(p)+'</option>'; }).join('') +
@@ -4035,7 +4037,8 @@ document.addEventListener('DOMContentLoaded',function(){
 
     var name = (nameEl.value||'').trim();
     if(!name){ statusEl.textContent='Please give this session a name.'; statusEl.className='archStatus archStatusErr'; nameEl.focus(); return; }
-    var phase = bucketEl.value;
+    var progNow = (document.getElementById('archSaveProgram')||{}).value||'';
+    var phase = isSeniorProgram(progNow) ? SENIOR_PHASE : bucketEl.value;
     var year = (yearEl.value||'').trim() || String(new Date().getFullYear());
     var asNew = asNewEl && asNewEl.checked;
     var updatingId = (currentSession.sessionId && !asNew) ? currentSession.sessionId : null;
@@ -4115,8 +4118,18 @@ document.addEventListener('DOMContentLoaded',function(){
       }).join('') : '<span class="archStatus">No saved sessions yet \u2014 use \u201cSave Session\u201d to add the first one.</span>';
 
       var yearData = archive[y] || {};
-      var colsHtml = PHASES.map(function(phase){
-        var sessions = yearData[phase] || {};
+      var seniorView = isSeniorProgram(progFilter);
+      var hasSenior = Object.keys(yearData[SENIOR_PHASE]||{}).length>0 || PHASES.some(function(ph){ var m=yearData[ph]||{}; return Object.keys(m).some(function(id){ return isSeniorProgram(m[id]&&m[id].program); }); });
+      var shownPhases = seniorView ? [SENIOR_PHASE] : (progFilter==='__all__' && hasSenior ? PHASES : YOUTH_PHASES);
+      var colsHtml = shownPhases.map(function(phase){
+        var sessions = {}, realPh = {};
+        PHASES.forEach(function(ph){
+          var m = yearData[ph] || {};
+          Object.keys(m).forEach(function(id){
+            var sen = isSeniorProgram(m[id] && m[id].program);
+            if((phase===SENIOR_PHASE) === sen && (sen || ph===phase)){ sessions[id] = m[id]; realPh[id] = ph; }
+          });
+        });
         var ids = Object.keys(sessions).filter(function(id){
           if(!passesProgram(sessions[id])) return false;
           if(!search) return true;
@@ -4130,10 +4143,10 @@ document.addEventListener('DOMContentLoaded',function(){
             '<div class="archItemLabel">'+escapeHtmlArch(r.sessionName||'Untitled')+(r.program?'<span class="archProgBadge">'+escapeHtmlArch(r.program)+'</span>':'')+(isOpen?'<span class="archCurrentBadge">OPEN</span>':'')+'</div>' +
             '<div class="archItemMeta">'+escapeHtmlArch([r.week?('Wk '+r.week):'', r.session?('Session '+r.session):'', r.date||''].filter(Boolean).join(' \u00b7 '))+'</div>' +
             '<div class="archItemBtns">' +
-              '<button class="btn ghost archOpenBtn" data-id="'+escapeHtmlArch(id)+'" data-phase="'+phase+'" data-year="'+escapeHtmlArch(y)+'">Open</button>' +
-              '<button class="btn ghost archDupBtn" data-id="'+escapeHtmlArch(id)+'" data-phase="'+phase+'" data-year="'+escapeHtmlArch(y)+'" data-name="'+escapeHtmlArch(r.sessionName||'Untitled')+'">Duplicate</button>' +
-              (r.program ? '' : '<button class="btn ghost archTagBtn" data-id="'+escapeHtmlArch(id)+'" data-phase="'+phase+'" data-year="'+escapeHtmlArch(y)+'">Tag\u2026</button>') +
-              '<button class="btn ghost archDelBtn" data-id="'+escapeHtmlArch(id)+'" data-phase="'+phase+'" data-year="'+escapeHtmlArch(y)+'" data-name="'+escapeHtmlArch(r.sessionName||'Untitled')+'">Delete</button>' +
+              '<button class="btn ghost archOpenBtn" data-id="'+escapeHtmlArch(id)+'" data-phase="'+realPh[id]+'" data-year="'+escapeHtmlArch(y)+'">Open</button>' +
+              '<button class="btn ghost archDupBtn" data-id="'+escapeHtmlArch(id)+'" data-phase="'+realPh[id]+'" data-year="'+escapeHtmlArch(y)+'" data-name="'+escapeHtmlArch(r.sessionName||'Untitled')+'">Duplicate</button>' +
+              (r.program ? '' : '<button class="btn ghost archTagBtn" data-id="'+escapeHtmlArch(id)+'" data-phase="'+realPh[id]+'" data-year="'+escapeHtmlArch(y)+'">Tag\u2026</button>') +
+              '<button class="btn ghost archDelBtn" data-id="'+escapeHtmlArch(id)+'" data-phase="'+realPh[id]+'" data-year="'+escapeHtmlArch(y)+'" data-name="'+escapeHtmlArch(r.sessionName||'Untitled')+'">Delete</button>' +
             '</div>' +
           '</div>';
         }).join('') : '<div class="archEmpty">Nothing here yet</div>';
