@@ -2892,9 +2892,9 @@ document.addEventListener('DOMContentLoaded',function(){
   function reallySave_SCHED(){ try{ localStorage.setItem(LS_KEY_SCHED, JSON.stringify(collectState_SCHED())); }catch(e){} }
   function saveState_SCHED(){ if(!saveEnabled_SCHED) return; clearTimeout(saveTimer_SCHED); saveTimer_SCHED=setTimeout(reallySave_SCHED, 400); scheduleCloudPush_SCHED(); }
 
-  /* ---- cloud sync: same JSONBin bin as the Session Library, under a reserved key ---- */
+  /* ---- cloud sync: stored in the shared Firebase library, as a reserved entry ---- */
   var SCHED_CLOUD_KEY = '__seasonSchedule';
-  var SCHED_SYNC_TEXT = { local:'Saved on this device', saving:'Syncing\u2026', cloud:'Synced to cloud', error:'Cloud unreachable \u2014 saved on this device' };
+  var SCHED_SYNC_TEXT = { local:'Saved on this device', saving:'Syncing\u2026', cloud:'Synced to cloud', error:'Not synced \u2014 saved on this device' };
   var schedCloudTimer = null, localLastModified_SCHED = 0;
   function cloudAvailable_SCHED(){ return typeof archiveFetch==='function' && typeof archivePut==='function'; }
   function setSchedSyncStatus(state){
@@ -2934,6 +2934,7 @@ document.addEventListener('DOMContentLoaded',function(){
       } else setSchedSyncStatus('cloud');
     }).catch(function(){ setSchedSyncStatus('error'); });
   }
+  window.addEventListener('qc-signed-in', function(){ reconcileCloudSchedule_SCHED(localLastModified_SCHED); });
   function loadState_SCHED(){
     var raw; try{ raw=localStorage.getItem(LS_KEY_SCHED); }catch(e){ return false; }
     if(!raw) return false;
@@ -3316,7 +3317,7 @@ document.addEventListener('DOMContentLoaded',function(){
   function cloudOK(){ return typeof archiveFetch==='function' && typeof archivePut==='function'; }
   function pageNames(sfx){ return [].map.call(document.querySelectorAll('#roster-'+sfx.toLowerCase()+' .chip .nm'), function(n){ return n.textContent.trim(); }).filter(Boolean); }
 
-  var TXT={local:'Saved on this device', saving:'Syncing…', cloud:'Synced to cloud', error:'Cloud unreachable — saved on this device'};
+  var TXT={local:'Saved on this device', saving:'Syncing…', cloud:'Synced to cloud', error:'Not synced — saved on this device'};
   function status(state){
     PAGES.forEach(function(s){
       var el=document.getElementById('squadStatus-'+s.toLowerCase()); if(el){ el.className='squadStatus '+state; el.textContent=TXT[state]||''; }
@@ -3393,6 +3394,7 @@ document.addEventListener('DOMContentLoaded',function(){
     renderNotes(); reconcile();
   };
 
+  window.addEventListener('qc-signed-in', function(){ reconcile(); });   // signed in after the page loaded: catch up now
   window.addEventListener('load', function(){
     window.__lastProgram = prog();
     renderNotes();
@@ -3407,29 +3409,18 @@ document.addEventListener('DOMContentLoaded',function(){
 </script>
 <script>
   /* ============================================================
-     SESSION LIBRARY — cloud storage via JSONBin
+     SESSION LIBRARY — cloud storage via Firebase (Firestore)
      ------------------------------------------------------------
-     Schema: { "<year>": { "Preseason Phase": { "<sessionId>": {sessionId,
-       sessionName, year, phase, lastModified, template, week, session, date,
-       venue, plannerState}, ... }, "Leadership Phase": {...},
-       "Championship Preparation Phase": {...} }, ... }
-
-     Abstraction layer: saveSession() / loadSession() / deleteSession() /
-     duplicateSession() are the ONLY functions that know about the JSONBin
-     schema. archiveFetch()/archivePut() are the only two that call fetch()
-     at all — every UI action goes through this layer.
-
-     SECURITY NOTE: JSONBIN_API_KEY below is a live credential embedded in
-     client-side code — anyone who can view this file's source can use it
-     to read, overwrite, or delete this JSONBin account's data. Inherent to
-     a no-backend static-page setup. Consider a JSONBin Access Key scoped
-     to only this bin with Read+Update (no Delete) permissions instead of
-     a Master Key.
+     The rest of the planner still sees one library object:
+       { "<year>": { "<phase>": { "<sessionId>": {session} } },
+         "__seasonSchedule": {...}, "__squads": {...} }
+     but in the cloud every session is its own document, so:
+       - there is no 100 KB ceiling for the whole library,
+       - two coaches saving different sessions can't overwrite each other,
+       - only sessions that actually changed are written.
+     archiveFetch()/archivePut() are the only functions that talk to the cloud.
+     Access needs a coach sign-in; the Firestore rules decide who is allowed.
      ============================================================ */
-  var JSONBIN_BIN_ID = '6a9b6013da38895dfe3a8b62';
-  var JSONBIN_API_KEY = '$2a$10$/0IxTXc47L2vv1kIX1/1DOp197DmewAtRUn.phdTZa9JonwEca072';
-  var JSONBIN_BASE = 'https://api.jsonbin.io/v3/b/' + JSONBIN_BIN_ID;
-
   var PHASES = ['Preseason Phase','Leadership Phase','Championship Preparation Phase'];
 
   function phaseForTemplate(v){
@@ -3438,85 +3429,295 @@ document.addEventListener('DOMContentLoaded',function(){
     return 'Preseason Phase';
   }
 
-  function archiveFetch(){
-    return fetch(JSONBIN_BASE + '/latest', {
-      headers: { 'X-Master-Key': JSONBIN_API_KEY, 'X-Bin-Meta': 'false' }
-    }).then(function(res){
-      if(!res.ok){
-        if(res.status===404) return {};
-        return archiveFail(res, 0);
+  var COLL_SESSIONS = 'plannerSessions', COLL_META = 'plannerMeta';
+  var LEGACY_LIBRARY_BIN = '6a9b6013da38895dfe3a8b62';     // only used to recognise the right bin in an old backup file
+  var libSnapshot = null;       // what the cloud held when we last read or wrote it: { "coll/id": json text }
+
+  function cloudErr(code, msg){ var e = new Error(msg || code); e.code = code; return e; }
+  function fb(){ return window.qcFB || null; }
+
+  /* ---------- sign in ---------- */
+  var signInPromise = null;
+  function ensureAuth(){
+    var f = fb();
+    if(!f) return Promise.reject(cloudErr('offline', 'The sign-in service could not be loaded. Are you offline?'));
+    // background syncs (page load) must never throw a pop-up at someone; only a deliberate click may ask for a sign-in
+    var gesture = !!(navigator.userActivation && navigator.userActivation.isActive);
+    return f.ready.then(function(){
+      if(f.user()) return f.user();
+      if(!gesture) throw cloudErr('signin-required', 'Sign in to sync');
+      return showSignIn();
+    });
+  }
+  function authMsg(err){
+    var c = (err && err.code) || '';
+    if(/invalid-credential|wrong-password|user-not-found|invalid-email|missing-password/.test(c)) return 'That email or password is not right.';
+    if(/too-many-requests/.test(c)) return 'Too many tries. Wait a few minutes, or use the reset link.';
+    if(/network-request-failed/.test(c)) return 'No connection. Check your internet and try again.';
+    if(/user-disabled/.test(c)) return 'This account has been switched off. Ask the admin.';
+    return (err && err.message) || 'Could not sign in.';
+  }
+  function showSignIn(){
+    if(signInPromise) return signInPromise;
+    signInPromise = new Promise(function(resolve, reject){
+      var ov = document.createElement('div'); ov.className = 'archOverlay qcAuthOv qcNoSnap'; ov.style.zIndex = '10001';
+      ov.innerHTML =
+        '<div class="archModal" style="max-width:400px"><div class="archModalHead"><span>Coach sign in</span>' +
+        '<button type="button" class="archModalX" data-a="x" aria-label="Close">&#10005;</button></div><div class="archModalBody">' +
+        '<p class="archStatus" style="margin-top:0">Sign in to save to, and open, the shared session library. Everything you type on the page stays on this device either way.</p>' +
+        '<label class="archField">Email<input id="qcAuthEmail" type="email" autocomplete="username" spellcheck="false"></label>' +
+        '<label class="archField">Password<input id="qcAuthPass" type="password" autocomplete="current-password"></label>' +
+        '<div id="qcAuthMsg" class="archStatus"></div>' +
+        '<div class="archActions"><button class="btn ghost" type="button" data-a="reset">Email me a reset link</button>' +
+        '<button class="btn ghost" type="button" data-a="x">Cancel</button><button class="btn" type="button" data-a="go">Sign in</button></div></div></div>';
+      document.body.appendChild(ov);
+      var em = ov.querySelector('#qcAuthEmail'), pw = ov.querySelector('#qcAuthPass'), msg = ov.querySelector('#qcAuthMsg');
+      function say(t, bad){ msg.textContent = t; msg.className = 'archStatus' + (bad ? ' archStatusErr' : ' archStatusOk'); }
+      function finish(){ document.removeEventListener('keydown', onKey, true); ov.remove(); signInPromise = null; }
+      function cancel(){ finish(); reject(cloudErr('signin-cancelled', 'Sign-in was cancelled')); }
+      function go(){
+        var e = em.value.trim(), p = pw.value;
+        if(!e || !p){ say('Enter your email and password.', true); return; }
+        say('Signing in\u2026', false);
+        fb().signIn(e, p).then(function(user){
+          finish(); resolve(user);
+          try{ window.dispatchEvent(new Event('qc-signed-in')); }catch(x){}
+        }).catch(function(err){ say(authMsg(err), true); });
       }
-      return res.json();
-    }).then(function(data){
-      return (data && typeof data==='object') ? zDecodeLibrary(data) : {};
+      function onKey(ev){ if(ev.key === 'Escape'){ ev.stopPropagation(); cancel(); } else if(ev.key === 'Enter' && ov.contains(document.activeElement)){ ev.preventDefault(); go(); } }
+      document.addEventListener('keydown', onKey, true);
+      ov.addEventListener('click', function(ev){
+        var a = ev.target.closest && ev.target.closest('[data-a]'); if(!a) return;
+        var act = a.getAttribute('data-a');
+        if(act === 'x') cancel();
+        else if(act === 'go') go();
+        else if(act === 'reset'){
+          var e = em.value.trim(); if(!e){ say('Type your email first, then click the reset link.', true); return; }
+          fb().resetPassword(e).then(function(){ say('If that email has an account, a reset link is on its way.', false); })
+            .catch(function(err){ say(authMsg(err), true); });
+        }
+      });
+      setTimeout(function(){ em.focus(); }, 30);
+    });
+    return signInPromise;
+  }
+
+  /* ---------- read / write the library ---------- */
+  function metaKey(id){ return '__' + id; }
+  function archiveFetch(){
+    return ensureAuth().then(function(){ return fb().readAll(); }).then(function(all){
+      var lib = {}, snap = {};
+      (all.sessions || []).forEach(function(d){
+        var rec; try{ rec = JSON.parse(d.rec); }catch(e){ return; }
+        var y = d.year || rec.year, p = d.phase || rec.phase; if(!y || !p) return;
+        if(!lib[y]) lib[y] = {}; if(!lib[y][p]) lib[y][p] = {};
+        lib[y][p][d.id] = rec; snap[COLL_SESSIONS + '/' + d.id] = d.rec;
+      });
+      (all.meta || []).forEach(function(d){
+        var v; try{ v = JSON.parse(d.json); }catch(e){ return; }
+        lib[metaKey(d.id)] = v; snap[COLL_META + '/' + d.id] = d.json;
+      });
+      libSnapshot = snap;
+      return lib;
+    });
+  }
+  function archivePut(lib){
+    return ensureAuth().then(function(){
+      var next = {}, key;
+      Object.keys(lib || {}).forEach(function(k){
+        var v = lib[k];
+        if(k.indexOf('__') === 0){
+          var mid = k.slice(2); if(!mid || v == null) return;
+          var json = JSON.stringify(v);
+          next[COLL_META + '/' + mid] = { coll:COLL_META, id:mid, str:json, data:{ json:json } };
+          return;
+        }
+        if(!v || typeof v !== 'object') return;
+        Object.keys(v).forEach(function(ph){
+          var m = v[ph] || {};
+          Object.keys(m).forEach(function(sid){
+            var rec = m[sid]; if(!rec) return;
+            var str = JSON.stringify(rec);
+            if(str.length > 900000) throw cloudErr('too-big', 'This session is too large to store (' + Math.round(str.length / 1024) + ' KB).');
+            next[COLL_SESSIONS + '/' + sid] = { coll:COLL_SESSIONS, id:sid, str:str, data:{
+              year:String(k), phase:ph, rec:str, sessionName:rec.sessionName || '', program:rec.program || '', lastModified:rec.lastModified || '' } };
+          });
+        });
+      });
+      var sets = [], deletes = [];
+      Object.keys(next).forEach(function(k){ if(!libSnapshot || libSnapshot[k] !== next[k].str) sets.push(next[k]); });
+      // only delete what WE knew about and have since removed: another coach's new session is never touched
+      if(libSnapshot) Object.keys(libSnapshot).forEach(function(k){ if(!(k in next)){ var i = k.indexOf('/'); deletes.push({ coll:k.slice(0, i), id:k.slice(i + 1) }); } });
+      if(!sets.length && !deletes.length) return { ok:true };
+      return fb().commit(sets, deletes).then(function(){
+        if(!libSnapshot) libSnapshot = {};
+        sets.forEach(function(s){ libSnapshot[s.coll + '/' + s.id] = s.str; });
+        deletes.forEach(function(d){ delete libSnapshot[d.coll + '/' + d.id]; });
+        return { ok:true };
+      });
     });
   }
 
-  /* ---- compact storage ------------------------------------------------------------------------------
-     The whole library (sessions, squads, schedule) lives in ONE JSONBin record and free accounts refuse
-     records over 100 KB. Session pages are mostly repeated markup, so the library is gzip-compressed and
-     stored as {"_z":1,"d":"<base64>"}. Old uncompressed libraries are still read as normal, and the next
-     save converts them. Browsers without CompressionStream simply keep saving uncompressed. */
-  function zOK(){ return typeof CompressionStream==='function' && typeof DecompressionStream==='function' && typeof Response==='function' && typeof Blob==='function'; }
-  function bytesToB64(u8){ var out='', CH=0x8000; for(var i=0;i<u8.length;i+=CH) out+=String.fromCharCode.apply(null,u8.subarray(i,i+CH)); return btoa(out); }
-  function b64ToBytes(b64){ var bin=atob(b64), u8=new Uint8Array(bin.length); for(var i=0;i<bin.length;i++) u8[i]=bin.charCodeAt(i); return u8; }
-  function isPlain(o){ return o && typeof o==='object' && !Array.isArray(o); }
-  function mergeInto(base, extra){   // anything an older (uncompressed) copy of the page added beside the compressed block is kept
-    Object.keys(extra).forEach(function(k){
-      if(isPlain(base[k]) && isPlain(extra[k])) mergeInto(base[k], extra[k]); else if(!(k in base)) base[k]=extra[k];
-    });
+  function archiveErrorText(err){
+    var c = (err && err.code) || '';
+    if(c === 'signin-cancelled') return 'Not saved to the shared library because you did not sign in. Your session is still safe on this device.';
+    if(c === 'signin-required') return 'Please sign in (the \u201cSign in\u201d button at the bottom) to save to the shared library.';
+    if(c === 'offline') return 'Could not reach the sign-in service. Check your internet connection and try again.';
+    if(/permission-denied/.test(c)) return 'This account is not allowed to use the shared library. Ask the admin to add your email. Your session is still safe on this device.';
+    if(/resource-exhausted/.test(c)) return 'The free daily limit for the shared library has been reached. It resets within a day. Your session is still safe on this device.';
+    if(/unavailable|network/.test(c)) return 'Could not reach the library. Check your internet connection and try again.';
+    if(c === 'too-big') return err.message;
+    return 'Could not save \u2014 ' + ((err && err.message) || 'unknown error') + ' Your session is still safe on this device.';
+  }
+  function archiveLoadErrorText(err){
+    var c = (err && err.code) || '';
+    if(c === 'signin-cancelled' || c === 'signin-required') return 'Sign in to open the shared library.';
+    return archiveErrorText(err).replace(/^Could not save/, 'Could not load the library').replace(/Your session is still safe on this device\.?$/, '').trim();
+  }
+
+  /* ---------- account button: sign in, backup, import ---------- */
+  function b64ToBytes(b64){ var bin = atob(b64), u8 = new Uint8Array(bin.length); for(var i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); return u8; }
+  function isPlainObj(o){ return o && typeof o === 'object' && !Array.isArray(o); }
+  function mergeInto(base, extra){
+    Object.keys(extra).forEach(function(k){ if(isPlainObj(base[k]) && isPlainObj(extra[k])) mergeInto(base[k], extra[k]); else if(!(k in base)) base[k] = extra[k]; });
     return base;
   }
-  function zDecodeLibrary(data){
-    if(!(data && data._z===1 && typeof data.d==='string')) return data;
-    if(!zOK()) throw new Error('This browser is too old to open the compressed library');
-    var extra={}; Object.keys(data).forEach(function(k){ if(k!=='_z' && k!=='d' && k!=='alg') extra[k]=data[k]; });
-    var ds=new Blob([b64ToBytes(data.d)]).stream().pipeThrough(new DecompressionStream('gzip'));
+  function zDecodeLibrary(data){          // old libraries were gzip-compressed as {"_z":1,"d":"<base64>"}
+    if(!(data && data._z === 1 && typeof data.d === 'string')) return Promise.resolve(data);
+    if(typeof DecompressionStream !== 'function') return Promise.reject(new Error('This browser cannot read the compressed backup. Use a current Chrome, Edge or Safari.'));
+    var extra = {}; Object.keys(data).forEach(function(k){ if(k !== '_z' && k !== 'd' && k !== 'alg') extra[k] = data[k]; });
+    var ds = new Blob([b64ToBytes(data.d)]).stream().pipeThrough(new DecompressionStream('gzip'));
     return new Response(ds).text().then(function(t){ return mergeInto(JSON.parse(t), extra); });
   }
-  function zEncodeLibrary(obj){
-    var json=JSON.stringify(obj);
-    if(!zOK()) return Promise.resolve(json);
-    var cs=new Blob([new TextEncoder().encode(json)]).stream().pipeThrough(new CompressionStream('gzip'));
-    return new Response(cs).arrayBuffer().then(function(buf){
-      var packed=JSON.stringify({_z:1, alg:'gzip-b64', d:bytesToB64(new Uint8Array(buf))});
-      return packed.length < json.length ? packed : json;
-    }).catch(function(){ return json; });
+  function looksLikeLibrary(r){ return !!r && typeof r === 'object' && (r._z === 1 || Object.keys(r).some(function(k){ return /^\d{4}$/.test(k) || k === '__seasonSchedule' || k === '__squads'; })); }
+  function extractLibrary(obj){
+    if(obj && isPlainObj(obj.library)) return Promise.resolve(obj.library);                // a backup made by this page
+    var cands = [];
+    if(obj && Array.isArray(obj.bins)) obj.bins.forEach(function(b){ cands.push({ id:b.id, rec:b.record }); });   // a bin-finder backup
+    else cands.push({ id:'', rec:(obj && obj.record && Object.keys(obj).length <= 2) ? obj.record : obj });       // one raw bin
+    var pick = cands.filter(function(c){ return c.id === LEGACY_LIBRARY_BIN; })[0] || cands.filter(function(c){ return looksLikeLibrary(c.rec); })[0];
+    if(!pick) return Promise.reject(new Error('That file does not contain a session library.'));
+    return zDecodeLibrary(pick.rec);
   }
-  window.qcZ={encode:zEncodeLibrary, decode:zDecodeLibrary};
-
-  /* turn a refused request into an Error that carries the status, the service's own explanation and the library size */
-  function archiveFail(res, bytes){
-    return res.text().then(function(t){
-      var msg=''; try{ msg=(JSON.parse(t)||{}).message||''; }catch(e){ msg=String(t||'').slice(0,160); }
-      var err=new Error('HTTP '+res.status+(msg?' \u2014 '+msg:''));
-      err.status=res.status; err.serverMessage=msg; err.sizeKB=bytes?Math.round(bytes/1024):0;
-      throw err;
+  function mergeLibraries(cur, inc){
+    var added = 0, newer = 0, kept = 0;
+    Object.keys(inc).forEach(function(k){
+      var v = inc[k];
+      if(k.indexOf('__') === 0){
+        if(!cur[k] || ((v && v.lastModified) || 0) > ((cur[k] && cur[k].lastModified) || 0)){ cur[k] = v; }
+        return;
+      }
+      if(!isPlainObj(v)) return;
+      Object.keys(v).forEach(function(ph){
+        var m = v[ph] || {};
+        Object.keys(m).forEach(function(sid){
+          if(!cur[k]) cur[k] = {}; if(!cur[k][ph]) cur[k][ph] = {};
+          var have = cur[k][ph][sid];
+          if(!have){ cur[k][ph][sid] = m[sid]; added++; }
+          else if(String(m[sid].lastModified || '') > String(have.lastModified || '')){ cur[k][ph][sid] = m[sid]; newer++; }
+          else kept++;
+        });
+      });
     });
+    return { added:added, newer:newer, kept:kept };
   }
-  function archivePut(fullData){
-    return zEncodeLibrary(fullData).then(function(body){ return archivePutBody(body); });
+  function downloadJson(name, obj){
+    var blob = new Blob([JSON.stringify(obj)], { type:'application/json' });
+    var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 500);
   }
-  function archivePutBody(body){
-    return fetch(JSONBIN_BASE, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_API_KEY },
-      body: body
-    }).then(function(res){
-      if(!res.ok) return archiveFail(res, body.length);
-      return res.json();
+  function acctLabel(){
+    var b = document.getElementById('qcAcctBtn'), f = fb(); if(!b) return;
+    var u = f && f.user && f.user();
+    b.innerHTML = u ? '\u2601 Account' : '\u2601 Sign in';
+    b.title = u ? ('Signed in as ' + u.email) : 'Sign in to use the shared session library';
+  }
+  function openAccount(){
+    var f = fb(); var u = f && f.user();
+    if(!u){ ensureAuth().then(acctLabel).catch(function(){}); return; }
+    var ov = document.createElement('div'); ov.className = 'archOverlay qcNoSnap'; ov.style.zIndex = '10001';
+    ov.innerHTML =
+      '<div class="archModal" style="max-width:440px"><div class="archModalHead"><span>Shared library account</span>' +
+      '<button type="button" class="archModalX" data-a="x" aria-label="Close">&#10005;</button></div><div class="archModalBody">' +
+      '<p class="archStatus" style="margin-top:0">Signed in as <b></b></p>' +
+      '<div class="archActions" style="justify-content:flex-start;flex-wrap:wrap;gap:8px">' +
+      '<button class="btn ghost" type="button" data-a="backup">Download library backup</button>' +
+      '<button class="btn ghost" type="button" data-a="out">Sign out</button></div>' +
+      '<div style="border-top:1px solid var(--line);margin:14px 0 4px;padding-top:12px"><b style="font-size:13px">Bring in your old JSONBin library</b>' +
+      '<label class="archField" style="margin-top:8px">JSONBin Master Key<input id="qcJbKey" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your key here"></label>' +
+      '<div class="archActions" style="justify-content:flex-start;gap:8px"><button class="btn" type="button" data-a="jb">Import from JSONBin</button>' +
+      '<button class="btn ghost" type="button" data-a="import">Import from a backup file</button></div>' +
+      '<p class="archStatus" style="margin:6px 0 0">The key is only sent to JSONBin and is never saved. Importing adds your old sessions, squads and schedule. Anything already in the shared library is kept.</p></div>' +
+      '<input type="file" id="qcImportFile" accept=".json,application/json" style="display:none">' +
+      '<div id="qcAcctMsg" class="archStatus" style="margin-top:12px"></div>' +
+      '</div></div>';
+    ov.querySelector('b').textContent = u.email;
+    document.body.appendChild(ov);
+    var msg = ov.querySelector('#qcAcctMsg'), file = ov.querySelector('#qcImportFile');
+    function say(t, bad){ msg.textContent = t; msg.className = 'archStatus ' + (bad ? 'archStatusErr' : 'archStatusOk'); }
+    ov.addEventListener('click', function(ev){
+      if(ev.target === ov){ ov.remove(); return; }
+      var a = ev.target.closest && ev.target.closest('[data-a]'); if(!a) return;
+      var act = a.getAttribute('data-a');
+      if(act === 'x') ov.remove();
+      else if(act === 'out'){ f.signOut().then(function(){ ov.remove(); acctLabel(); }); }
+      else if(act === 'import') file.click();
+      else if(act === 'backup'){
+        say('Preparing\u2026', false);
+        archiveFetch().then(function(lib){
+          downloadJson('session-library-backup-' + new Date().toISOString().slice(0, 10) + '.json', { tool:'session-planner', exportedAt:new Date().toISOString(), library:lib });
+          say('Backup downloaded.', false);
+        }).catch(function(err){ say(archiveLoadErrorText(err), true); });
+      }
     });
-  }
-  function archiveErrorText(err){
-    var st=err&&err.status;
-    if(st===401||st===403||st===413||st===429){
-      return 'The online library refused this save (HTTP '+st+(err.serverMessage?': '+err.serverMessage:'')+'). '+
-        'That usually means the library service\u2019s storage or request limit has been reached, or its access key has changed'+
-        (err.sizeKB?' \u2014 the library is currently about '+err.sizeKB+' KB':'')+'. '+
-        'Your session is still safe on this device. Check the JSONBin account\u2019s usage and key.';
+    function importInto(incPromise){
+      return incPromise.then(function(inc){
+        return archiveFetch().then(function(cur){
+          var r = mergeLibraries(cur, inc);
+          return archivePut(cur).then(function(){ return r; });
+        });
+      }).then(function(r){
+        say('Imported ' + r.added + ' new session' + (r.added === 1 ? '' : 's') + (r.newer ? ', updated ' + r.newer : '') + (r.kept ? ', ' + r.kept + ' already up to date' : '') + '. You can sign out or close this window.', false);
+        window.dispatchEvent(new Event('qc-signed-in'));
+      }).catch(function(err){ say(err && err.code ? archiveErrorText(err) : ('Could not import: ' + (err && err.message || err)), true); });
     }
-    return 'Could not save \u2014 check your internet connection and try again. ('+(err&&err.message||'unknown error')+')';
+    function importFromJsonbin(){
+      var key = (ov.querySelector('#qcJbKey').value || '').trim();
+      if(!key){ say('Paste your JSONBin Master Key first.', true); return; }
+      say('Reading your old library from JSONBin\u2026', false);
+      importInto(
+        fetch('https://api.jsonbin.io/v3/b/' + LEGACY_LIBRARY_BIN + '/latest', { headers:{ 'X-Master-Key': key, 'X-Bin-Meta': 'false' } })
+          .catch(function(){ throw new Error('Could not reach JSONBin. Check your internet connection.'); })
+          .then(function(res){
+            if(res.ok) return res.json();
+            return res.text().then(function(t){ var m = ''; try{ m = JSON.parse(t).message || ''; }catch(e){}
+              throw new Error('JSONBin refused the request (HTTP ' + res.status + (m ? ': ' + m : '') + '). Check the key and try again.'); });
+          })
+          .then(function(rec){ return zDecodeLibrary(rec && rec.record !== undefined && Object.keys(rec).length <= 2 ? rec.record : rec); })
+      );
+    }
+    ov.querySelector('[data-a=jb]').addEventListener('click', importFromJsonbin);
+    file.addEventListener('change', function(){
+      var fl = file.files && file.files[0]; if(!fl) return;
+      say('Reading ' + fl.name + '\u2026', false);
+      importInto(fl.text().then(function(t){ return extractLibrary(JSON.parse(t)); }));
+      file.value = '';
+    });
   }
+  (function mountAccountBtn(){
+    var tries = 0;
+    var t = setInterval(function(){
+      var ref = document.getElementById('pageSettingsBtn');
+      if(ref && !document.getElementById('qcAcctBtn')){
+        var b = document.createElement('button'); b.id = 'qcAcctBtn'; b.type = 'button'; b.className = (ref.className || 'btn ghost') + ' qcNoSnap';
+        b.addEventListener('click', openAccount);
+        ref.insertAdjacentElement('afterend', b); acctLabel();
+      }
+      if(document.getElementById('qcAcctBtn') && fb()) acctLabel();
+      if(++tries > 60 || (document.getElementById('qcAcctBtn') && fb())) clearInterval(t);
+    }, 300);
+    window.addEventListener('qc-auth', acctLabel);
+  })();
 
   function ensureShape(archive, year, phase){
     if(!archive[year]) archive[year] = {};
@@ -3843,7 +4044,7 @@ document.addEventListener('DOMContentLoaded',function(){
     archiveFetch().then(function(archive){
       renderLibrary(overlay, archive, '');
     }).catch(function(err){
-      body.innerHTML = '<div class="archStatus archStatusErr">Could not load the library \u2014 check your internet connection and try again. (' + err.message + ')</div><div class="archActions"><button class="btn ghost" id="archLoadCancel">Close</button></div>';
+      body.innerHTML = '<div class="archStatus archStatusErr">' + archiveLoadErrorText(err) + '</div><div class="archActions"><button class="btn ghost" id="archLoadCancel">Close</button></div>';
       overlay.querySelector('#archLoadCancel').onclick=closeArchiveModal;
     });
   }
@@ -5086,6 +5287,62 @@ body.placing .role-pills, body.placing .scenario-role-zone{outline:2px dashed va
       '<div class="pickHint">Drag a name to a slot, or tap a name then tap a slot (use the bar at the bottom to jump between roster and grid).</div>');
   });
 })();
+</script>
+
+
+<!-- ==================== FIREBASE (sign-in + cloud database) ==================== -->
+<script type="module">
+  /* The Firebase web config below is meant to be public (it only names the project).
+     What protects the data is the Firestore security rules plus the coach sign-ins. */
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+  import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail }
+    from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+  import { getFirestore, collection, doc, getDocs, writeBatch }
+    from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+
+  const app = initializeApp({
+    apiKey: "AIzaSyAiVNZO7GNDi7tAx0XC7A-HGFBrSYrhg2s",
+    authDomain: "qc-session-planner.firebaseapp.com",
+    projectId: "qc-session-planner",
+    storageBucket: "qc-session-planner.firebasestorage.app",
+    messagingSenderId: "877201142937",
+    appId: "1:877201142937:web:da043fba4a27c3c205b408"
+  });
+  const auth = getAuth(app), db = getFirestore(app);
+  let current = null, markReady;
+  const ready = new Promise(function(r){ markReady = r; });
+  onAuthStateChanged(auth, function(u){
+    current = u; markReady();
+    window.dispatchEvent(new CustomEvent("qc-auth", { detail: { email: u ? u.email : "" } }));
+  });
+
+  window.qcFB = {
+    ready: ready,
+    user: function(){ return current; },
+    signIn: function(email, pass){ return signInWithEmailAndPassword(auth, email, pass).then(function(c){ return c.user; }); },
+    signOut: function(){ return signOut(auth); },
+    resetPassword: function(email){ return sendPasswordResetEmail(auth, email); },
+    readAll: async function(){
+      const parts = await Promise.all([ getDocs(collection(db, "plannerSessions")), getDocs(collection(db, "plannerMeta")) ]);
+      return {
+        sessions: parts[0].docs.map(function(d){ const x = d.data(); return { id: d.id, year: x.year, phase: x.phase, rec: x.rec }; }),
+        meta: parts[1].docs.map(function(d){ return { id: d.id, json: d.data().json }; })
+      };
+    },
+    commit: async function(sets, deletes){
+      const ops = sets.map(function(s){ return { t: "set", coll: s.coll, id: s.id, data: s.data }; })
+        .concat(deletes.map(function(d){ return { t: "del", coll: d.coll, id: d.id }; }));
+      for(let i = 0; i < ops.length; i += 400){            // a batch holds at most 500 writes
+        const b = writeBatch(db);
+        ops.slice(i, i + 400).forEach(function(o){
+          const ref = doc(db, o.coll, o.id);
+          if(o.t === "set") b.set(ref, o.data); else b.delete(ref);
+        });
+        await b.commit();
+      }
+    }
+  };
+  window.dispatchEvent(new Event("qc-fb-ready"));
 </script>
 
 </body>
