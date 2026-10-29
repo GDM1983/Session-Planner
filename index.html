@@ -3468,7 +3468,8 @@ document.addEventListener('DOMContentLoaded',function(){
         '<label class="archField">Email<input id="qcAuthEmail" type="email" autocomplete="username" spellcheck="false"></label>' +
         '<label class="archField">Password<input id="qcAuthPass" type="password" autocomplete="current-password"></label>' +
         '<div id="qcAuthMsg" class="archStatus"></div>' +
-        '<div class="archActions"><button class="btn ghost" type="button" data-a="reset">Email me a reset link</button>' +
+        '<p class="archStatus">First time? Type your email and a password you choose, then tap Create account. Your email must already be on the coach list.</p>' +
+        '<div class="archActions" style="flex-wrap:wrap"><button class="btn ghost" type="button" data-a="create">Create account</button><button class="btn ghost" type="button" data-a="reset">Email me a reset link</button>' +
         '<button class="btn ghost" type="button" data-a="x">Cancel</button><button class="btn" type="button" data-a="go">Sign in</button></div></div></div>';
       document.body.appendChild(ov);
       var em = ov.querySelector('#qcAuthEmail'), pw = ov.querySelector('#qcAuthPass'), msg = ov.querySelector('#qcAuthMsg');
@@ -3491,6 +3492,13 @@ document.addEventListener('DOMContentLoaded',function(){
         var act = a.getAttribute('data-a');
         if(act === 'x') cancel();
         else if(act === 'go') go();
+        else if(act === 'create'){
+          var e2 = em.value.trim().toLowerCase(), p2 = pw.value;
+          if(!e2 || p2.length < 6){ say('Enter your email and choose a password of at least 6 characters.', true); return; }
+          say('Creating your account\u2026', false);
+          fb().createAccount(e2, p2).then(function(user){ finish(); resolve(user); try{ window.dispatchEvent(new Event('qc-signed-in')); }catch(x){} })
+            .catch(function(err){ say(/email-already-in-use/.test((err&&err.code)||'') ? 'That email already has an account. Type your password and tap Sign in, or tap the reset link.' : /weak-password/.test((err&&err.code)||'') ? 'Choose a longer password (6 or more characters).' : authMsg(err), true); });
+        }
         else if(act === 'reset'){
           var e = em.value.trim(); if(!e){ say('Type your email first, then click the reset link.', true); return; }
           fb().resetPassword(e).then(function(){ say('If that email has an account, a reset link is on its way.', false); })
@@ -3649,6 +3657,11 @@ document.addEventListener('DOMContentLoaded',function(){
       '<button class="btn ghost" type="button" data-a="import">Import from a backup file</button></div>' +
       '<p class="archStatus" style="margin:6px 0 0">The key is only sent to JSONBin and is never saved. Importing adds your old sessions, squads and schedule. Anything already in the shared library is kept.</p></div>' +
       '<input type="file" id="qcImportFile" accept=".json,application/json" style="display:none">' +
+      '<div style="border-top:1px solid var(--line);margin:14px 0 4px;padding-top:12px"><b style="font-size:13px">Coaches allowed in</b>' +
+      '<div id="qcCoachList" class="archStatus" style="margin:6px 0">Loading\u2026</div>' +
+      '<label class="archField">Add coaches (one email per line, or separated by commas)<textarea id="qcCoachAdd" rows="3" spellcheck="false" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:8px;font:inherit"></textarea></label>' +
+      '<div class="archActions" style="justify-content:flex-start"><button class="btn" type="button" data-a="addcoaches">Add to coach list</button></div>' +
+      '<p class="archStatus" style="margin:6px 0 0">Only the admin can change this list. A new coach then opens the planner, taps Sign in, then Create account.</p></div>' +
       '<div id="qcAcctMsg" class="archStatus" style="margin-top:12px"></div>' +
       '</div></div>';
     ov.querySelector('b').textContent = u.email;
@@ -3697,6 +3710,31 @@ document.addEventListener('DOMContentLoaded',function(){
       );
     }
     ov.querySelector('[data-a=jb]').addEventListener('click', importFromJsonbin);
+    var coachBox = ov.querySelector('#qcCoachList');
+    function drawCoaches(){
+      f.listCoaches().then(function(list){
+        coachBox.innerHTML = list.length ? list.map(function(c){ return '<div style="display:flex;justify-content:space-between;gap:8px;padding:3px 0"><span style="word-break:break-all"></span><button type="button" class="btn ghost" data-rmcoach="' + c.replace(/"/g,'&quot;') + '" style="padding:2px 9px">Remove</button></div>'; }).join('') : 'No coaches listed yet.';
+        [].forEach.call(coachBox.querySelectorAll('span'), function(sp, i){ sp.textContent = list[i]; });
+      }).catch(function(err){ coachBox.textContent = /permission/.test((err&&err.code)||'') ? 'The coach list is only shown once the new security rules are published.' : 'Could not load the coach list.'; });
+    }
+    drawCoaches();
+    coachBox.addEventListener('click', function(ev){
+      var b = ev.target.closest && ev.target.closest('[data-rmcoach]'); if(!b) return;
+      var em = b.getAttribute('data-rmcoach');
+      if(!confirm('Remove ' + em + ' from the coach list? They will no longer be able to open the shared library.')) return;
+      f.removeCoach(em).then(drawCoaches).catch(function(err){ say(/permission/.test((err&&err.code)||'') ? 'Only the admin can change the coach list.' : 'Could not remove: ' + (err&&err.message), true); });
+    });
+    ov.querySelector('[data-a=addcoaches]').addEventListener('click', function(){
+      var raw = ov.querySelector('#qcCoachAdd').value;
+      var list = raw.split(/[\s,;]+/).map(function(x){ return x.trim().toLowerCase(); }).filter(Boolean);
+      var bad = list.filter(function(x){ return !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x); });
+      if(!list.length){ say('Type or paste at least one email.', true); return; }
+      if(bad.length){ say('These do not look like emails: ' + bad.join(', '), true); return; }
+      say('Adding ' + list.length + ' coach' + (list.length === 1 ? '' : 'es') + '\u2026', false);
+      Promise.all(list.map(function(x){ return f.addCoach(x); })).then(function(){
+        ov.querySelector('#qcCoachAdd').value = ''; say('Added ' + list.length + '. They can now tap Sign in, then Create account.', false); drawCoaches();
+      }).catch(function(err){ say(/permission/.test((err&&err.code)||'') ? 'Only the admin can change the coach list.' : 'Could not add: ' + (err&&err.message), true); });
+    });
     file.addEventListener('change', function(){
       var fl = file.files && file.files[0]; if(!fl) return;
       say('Reading ' + fl.name + '\u2026', false);
@@ -5295,9 +5333,9 @@ body.placing .role-pills, body.placing .scenario-role-zone{outline:2px dashed va
   /* The Firebase web config below is meant to be public (it only names the project).
      What protects the data is the Firestore security rules plus the coach sign-ins. */
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
-  import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail }
+  import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, sendPasswordResetEmail }
     from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
-  import { getFirestore, collection, doc, getDocs, writeBatch }
+  import { getFirestore, collection, doc, getDocs, writeBatch, setDoc, deleteDoc }
     from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
   const app = initializeApp({
@@ -5320,7 +5358,11 @@ body.placing .role-pills, body.placing .scenario-role-zone{outline:2px dashed va
     ready: ready,
     user: function(){ return current; },
     signIn: function(email, pass){ return signInWithEmailAndPassword(auth, email, pass).then(function(c){ return c.user; }); },
+    createAccount: function(email, pass){ return createUserWithEmailAndPassword(auth, email, pass).then(function(c){ return c.user; }); },
     signOut: function(){ return signOut(auth); },
+    listCoaches: async function(){ const r = await getDocs(collection(db, "coaches")); return r.docs.map(function(d){ return d.id; }).sort(); },
+    addCoach: function(email){ return setDoc(doc(db, "coaches", email), { email: email, added: new Date().toISOString() }); },
+    removeCoach: function(email){ return deleteDoc(doc(db, "coaches", email)); },
     resetPassword: function(email){ return sendPasswordResetEmail(auth, email); },
     readAll: async function(){
       const parts = await Promise.all([ getDocs(collection(db, "plannerSessions")), getDocs(collection(db, "plannerMeta")) ]);
